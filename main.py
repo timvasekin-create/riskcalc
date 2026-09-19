@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 import os
@@ -13,29 +13,29 @@ app = FastAPI(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "templates", "index.html")
 
+# ===== HEAD-обработчик для Render health check =====
+@app.head("/")
+async def head_root():
+    return Response(status_code=200)
 
-# ===== SEO-роуты. Отдают один и тот же файл, SEO меняется через JS =====
+# ===== SEO-роуты =====
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return FileResponse(INDEX_PATH)
-
 
 @app.get("/bitcoin-risk-calculator", response_class=HTMLResponse)
 async def bitcoin_page():
     return FileResponse(INDEX_PATH)
 
-
 @app.get("/bybit-calculator", response_class=HTMLResponse)
 async def bybit_page():
     return FileResponse(INDEX_PATH)
-
 
 @app.get("/hyperliquid-calculator", response_class=HTMLResponse)
 async def hyperliquid_page():
     return FileResponse(INDEX_PATH)
 
-
-# ===== API для расчётов (на будущее: Telegram-бот, внешние интеграции) =====
+# ===== API =====
 class CalcInput(BaseModel):
     margin: float = Field(..., gt=0)
     risk_type: str = Field(..., pattern="^(amount|percent)$")
@@ -46,9 +46,7 @@ class CalcInput(BaseModel):
     leverage: float = Field(..., gt=0, le=100)
     direction: str = Field("long", pattern="^(long|short)$")
 
-
 TAKER_FEE = 0.00045
-
 
 @app.post("/api/calculate")
 async def api_calculate(data: CalcInput):
@@ -88,15 +86,10 @@ async def api_calculate(data: CalcInput):
         "net_profit": round(potential_profit - total_fees, 2),
     }
 
-
 # ===== SEO-служебные =====
 @app.get("/robots.txt")
 async def robots():
-    return HTMLResponse(
-        content="User-agent: *\nAllow: /\nSitemap: /sitemap.xml",
-        media_type="text/plain",
-    )
-
+    return HTMLResponse(content="User-agent: *\nAllow: /\nSitemap: /sitemap.xml", media_type="text/plain")
 
 @app.get("/sitemap.xml")
 async def sitemap():
