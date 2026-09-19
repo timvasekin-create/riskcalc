@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- ===== SEO: значения по умолчанию, JS перезапишет под конкретный URL ===== -->
+    <title>Free Crypto Risk & Position Size Calculator — Bitcoin, Bybit, Hyperliquid</title>
+    <meta name="description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures. Free tool for Bybit, Hyperliquid, and Binance traders.">
+    <meta name="keywords" content="crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator">
+    <link rel="canonical" href="https://riskcalc.app/">
+
+    <meta property="og:title" content="Free Crypto Risk & Position Size Calculator">
+    <meta property="og:description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='80' fill='%2350d2c1'>⚡</text></svg>">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: { extend: {
+                fontFamily: { sans: ['Inter', 'sans-serif'] },
+                colors: { hyper: {
+                    bg:'#0a0e13', panel:'#0f1419', card:'#151a20', elev:'#1a2028',
+                    border:'#1e252e', borderLight:'#2a323d',
+                    text:'#eaecef', muted:'#5c6670', muted2:'#8b96a3',
+                    teal:'#50d2c1', tealDim:'#3ba899',
+                    red:'#f6465d', redDim:'#c73a4c', yellow:'#f0b90b'
+                }}
+            }}
+        }
+    </script>
+    <style>
+        body { font-family:'Inter',sans-serif; -webkit-font-smoothing:antialiased; }
+        ::-webkit-scrollbar { width:6px; height:6px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-thumb { background:#2a323d; border-radius:3px; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+        input[type=number] { -moz-appearance:textfield; }
+        input[type=range].hl-slider { -webkit-appearance:none; appearance:none; width:100%; height:4px; background:transparent; outline:none; cursor:pointer; }
+        input[type=range].hl-slider::-webkit-slider-runnable-track { height:4px; border-radius:2px; background:linear-gradient(to right,#50d2c1 0%,#50d2c1 var(--progress,0%),#2a323d var(--progress,0%),#2a323d 100%); }
+        input[type=range].hl-slider::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; height:16px; width:16px; border-radius:50%; background:#eaecef; border:2px solid #50d2c1; cursor:pointer; margin-top:-6px; box-shadow:0 0 0 3px rgba(80,210,193,0.15); transition:box-shadow 0.15s ease; }
+        input[type=range].hl-slider::-webkit-slider-thumb:hover { box-shadow:0 0 0 5px rgba(80,210,193,0.25); }
+        input[type=range].hl-slider::-moz-range-track { height:4px; border-radius:2px; background:#2a323d; }
+        input[type=range].hl-slider::-moz-range-progress { height:4px; border-radius:2px; background:#50d2c1; }
+        input[type=range].hl-slider::-moz-range-thumb { height:16px; width:16px; border-radius:50%; background:#eaecef; border:2px solid #50d2c1; cursor:pointer; }
+        .seg-group { display:flex; background:#0a0e13; border:1px solid #1e252e; border-radius:8px; padding:3px; gap:3px; }
+        .seg-btn { flex:1; padding:8px 12px; font-size:13px; font-weight:500; color:#5c6670; border-radius:6px; transition:all 0.15s ease; background:transparent; border:none; cursor:pointer; }
+        .seg-btn:hover { color:#8b96a3; }
+        .seg-btn.active { background:#1a2028; color:#eaecef; font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,0.3); }
+        .tab-btn { padding:8px 16px; font-size:13px; font-weight:500; color:#5c6670; background:transparent; border:none; cursor:pointer; position:relative; transition:color 0.15s; }
+        .tab-btn:hover { color:#8b96a3; }
+        .tab-btn.active { color:#eaecef; font-weight:600; }
+        .tab-btn.active::after { content:''; position:absolute; bottom:-1px; left:8px; right:8px; height:2px; background:#50d2c1; border-radius:1px; }
+        .dir-btn { padding:10px; font-size:13px; font-weight:600; border:none; cursor:pointer; transition:all 0.15s; color:#5c6670; background:transparent; }
+        .dir-btn.active-long { background:#50d2c1; color:#0a0e13; }
+        .dir-btn.active-short { background:#f6465d; color:#fff; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .animate-fade-in { animation:fadeIn 0.35s ease-out forwards; }
+        @keyframes modalIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+        .animate-modal-in { animation:modalIn 0.2s ease-out forwards; }
+        .hl-input { width:100%; background:#0a0e13; border:1px solid #1e252e; border-radius:6px; padding:10px 12px; color:#eaecef; font-size:14px; font-family:'Inter',monospace; transition:border-color 0.15s,box-shadow 0.15s; }
+        .hl-input:focus { outline:none; border-color:#50d2c1; box-shadow:0 0 0 3px rgba(80,210,193,0.1); }
+        .hl-input::placeholder { color:#3a4450; }
+        .hl-input.auto-computed { background:rgba(80,210,193,0.04); border-color:rgba(80,210,193,0.35); color:#50d2c1; }
+        .hl-input.auto-computed.stop-field { background:rgba(246,70,93,0.04); border-color:rgba(246,70,93,0.35); color:#f6465d; }
+        .result-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #1e252e; }
+        .result-row:last-child { border-bottom:none; }
+        .asset-scroll { display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; }
+        .asset-scroll::-webkit-scrollbar { height:4px; }
+        .asset-scroll::-webkit-scrollbar-thumb { background:#2a323d; border-radius:2px; }
+        .asset-btn { flex-shrink:0; display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px; background:#0a0e13; border:1px solid #1e252e; color:#8b96a3; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s ease; white-space:nowrap; }
+        .asset-btn:hover { border-color:#2a323d; color:#eaecef; }
+        .asset-btn.active { background:rgba(80,210,193,0.08); border-color:#50d2c1; color:#50d2c1; }
+        .asset-dot { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; }
+        .rr-bar { display:flex; height:8px; border-radius:4px; overflow:hidden; background:#0a0e13; border:1px solid #1e252e; }
+        .rr-bar-risk { background:linear-gradient(to right,#c73a4c,#f6465d); transition:width 0.4s ease; }
+        .rr-bar-reward { background:linear-gradient(to right,#50d2c1,#3ba899); transition:width 0.4s ease; }
+        .rr-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; font-family:'Inter',monospace; letter-spacing:0.3px; }
+        .rr-badge.good { background:rgba(80,210,193,0.15); color:#50d2c1; }
+        .rr-badge.warn { background:rgba(240,185,11,0.15); color:#f0b90b; }
+        .rr-badge.bad { background:rgba(246,70,93,0.15); color:#f6465d; }
+        details.adv-settings summary { list-style:none; }
+        details.adv-settings summary::-webkit-details-marker { display:none; }
+        details.adv-settings[open] .arrow-icon { transform:rotate(90deg); }
+        .arrow-icon { transition:transform 0.2s ease; }
+        .auto-badge { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border-radius:4px; background:rgba(80,210,193,0.12); color:#50d2c1; font-size:9px; font-weight:700; letter-spacing:0.05em; font-family:'Inter',monospace; text-transform:uppercase; }
+        .auto-badge.red { background:rgba(246,70,93,0.12); color:#f6465d; }
+        .auto-badge.hidden-badge { display:none; }
+        .wallet-card { cursor:pointer; transition:all 0.15s ease; }
+        .wallet-card:hover { border-color:#50d2c1; background:rgba(80,210,193,0.04); }
+        .wallet-card:hover .wallet-hint { opacity:1; }
+        .wallet-hint { opacity:0.5; transition:opacity 0.15s; }
+        #qrModal { backdrop-filter: blur(6px); }
+        #qrcode img { display:block; margin:0 auto; }
+    </style>
+</head>
+<body class="bg-hyper-bg text-hyper-text min-h-screen flex flex-col">
+
+    <!-- Топ-баннер с реф-ссылкой -->
+    <div class="bg-gradient-to-r from-hyper-bg via-hyper-panel to-hyper-bg border-b border-hyper-border py-2 px-4 text-center text-[13px]">
+        <span class="text-hyper-muted2">Get a <span class="text-hyper-teal font-semibold">5% discount</span> on Hyperliquid fees via this link</span>
+        <a href="https://app.hyperliquid.xyz/join/BENGALCAT4" target="_blank" rel="noopener" class="text-hyper-teal hover:text-white font-semibold transition-colors ml-2 underline decoration-dotted underline-offset-2">Claim →</a>
+    </div>
+
+    <!-- Хедер -->
+    <header class="border-b border-hyper-border bg-hyper-bg py-4 px-4 md:px-6 flex justify-between items-center">
+        <div class="flex items-center space-x-2">
+            <svg class="w-6 h-6 text-hyper-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+            <h1 class="text-lg font-bold tracking-tight text-white">Risk<span class="text-hyper-teal">Calc</span></h1>
+        </div>
+        <div class="text-[10px] text-hyper-muted font-mono tracking-[0.2em]">PRO TRADING TOOL</div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-6 md:py-10 max-w-7xl">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- ===== LEFT: CALCULATOR ===== -->
+            <div class="lg:col-span-2 space-y-5">
+
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-bold text-white mb-1">Position Size & Risk Calculator</h2>
+                    <p class="text-hyper-muted2 text-sm">Fill in your own margin, entry, and risk per trade — Stop Loss auto-calculates. Works with Bitcoin, Ethereum, Solana, Hyperliquid, and any crypto pair.</p>
+                </div>
+
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl overflow-hidden">
+
+                    <div class="p-4 border-b border-hyper-border">
+                        <div class="flex items-center justify-between mb-3">
+                            <label class="text-[11px] text-hyper-muted uppercase tracking-[0.15em] font-semibold">Asset</label>
+                            <span class="text-[10px] text-hyper-muted font-mono">Click to autofill price</span>
+                        </div>
+                        <div class="asset-scroll" id="assetScroll"></div>
+                    </div>
+
+                    <div class="p-4 border-b border-hyper-border">
+                        <div class="seg-group">
+                            <button type="button" class="seg-btn active" data-mode="cross">Cross</button>
+                            <button type="button" class="seg-btn" data-mode="leverage">Isolated</button>
+                            <button type="button" class="seg-btn" data-mode="unified">Unified</button>
+                        </div>
+                    </div>
+
+                    <div class="px-4 pt-3 border-b border-hyper-border flex gap-2">
+                        <button type="button" class="tab-btn active">Market</button>
+                        <button type="button" class="tab-btn">Limit</button>
+                        <button type="button" class="tab-btn">Pro</button>
+                        <div class="flex-1"></div>
+                        <div class="py-2 text-[11px] text-hyper-muted font-mono">Fees 0.045% / 0.015%</div>
+                    </div>
+
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 rounded-lg overflow-hidden border border-hyper-border">
+                            <button type="button" id="btnLong" class="dir-btn active-long">Buy / Long</button>
+                            <button type="button" id="btnShort" class="dir-btn">Sell / Short</button>
+                        </div>
+                    </div>
+
+                    <div class="px-4 pb-2 flex justify-between text-[13px]">
+                        <span class="text-hyper-muted2">Available to Trade</span>
+                        <span class="text-hyper-text font-mono" id="availDisplay">1,000.00 USDC</span>
+                    </div>
+                    <div class="px-4 pb-4 flex justify-between text-[13px] border-b border-hyper-border">
+                        <span class="text-hyper-muted2">Own Margin</span>
+                        <span class="text-hyper-text font-mono" id="marginDisplay">1,000.00 USDC</span>
+                    </div>
+
+                    <form id="calcForm" class="p-4 space-y-4" autocomplete="off">
+
+                        <div>
+                            <label class="block text-[12px] text-hyper-muted2 mb-1.5">Own Margin (USDC)</label>
+                            <div class="relative">
+                                <input type="number" id="ownMargin" value="1000" step="any" class="hl-input pr-16" required>
+                                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-hyper-muted font-mono">USDC</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="text-[12px] text-hyper-muted2">Risk per Trade</label>
+                                <div class="seg-group" style="padding:2px;">
+                                    <button type="button" class="seg-btn active" data-risk="amount" style="padding:4px 10px; font-size:11px;">USD</button>
+                                    <button type="button" class="seg-btn" data-risk="percent" style="padding:4px 10px; font-size:11px;">%</button>
+                                </div>
+                            </div>
+                            <div class="relative">
+                                <input type="number" id="riskValue" step="any" placeholder="e.g. 10 — leave empty for manual SL/TP" class="hl-input pr-12">
+                                <span id="riskSuffix" class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-hyper-muted font-mono">$</span>
+                            </div>
+                            <div class="flex gap-1.5 mt-2 flex-wrap">
+                                <button type="button" class="risk-preset text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted hover:text-white hover:border-hyper-borderLight transition-colors font-mono" data-val="5" data-type="amount">$5</button>
+                                <button type="button" class="risk-preset text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted hover:text-white hover:border-hyper-borderLight transition-colors font-mono" data-val="10" data-type="amount">$10</button>
+                                <button type="button" class="risk-preset text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted hover:text-white hover:border-hyper-borderLight transition-colors font-mono" data-val="25" data-type="amount">$25</button>
+                                <button type="button" class="risk-preset text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted hover:text-white hover:border-hyper-borderLight transition-colors font-mono" data-val="1" data-type="percent">1%</button>
+                                <button type="button" class="risk-preset text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted hover:text-white hover:border-hyper-borderLight transition-colors font-mono" data-val="2" data-type="percent">2%</button>
+                                <button type="button" id="clearRisk" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-red hover:border-hyper-red transition-colors font-mono">Clear</button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-[12px] text-hyper-muted2 mb-1.5">Entry Price (USD)</label>
+                            <div class="relative">
+                                <input type="number" id="entryPrice" value="95000" step="any" class="hl-input pr-10" required>
+                                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-hyper-muted font-mono">$</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] mb-1.5 flex items-center justify-between">
+                                    <span class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-hyper-red"></span>
+                                        <span class="text-hyper-muted2">Stop Loss</span>
+                                    </span>
+                                    <span id="slAutoBadge" class="auto-badge red hidden-badge">Auto</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="number" id="stopLoss" step="any" placeholder="—" class="hl-input pr-10">
+                                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-hyper-muted font-mono">$</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[12px] mb-1.5 flex items-center justify-between">
+                                    <span class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-hyper-teal"></span>
+                                        <span class="text-hyper-muted2">Take Profit</span>
+                                    </span>
+                                    <span id="tpAutoBadge" class="auto-badge hidden-badge">Auto</span>
+                                </label>
+                                <div class="relative">
+                                    <input type="number" id="takeProfit" step="any" placeholder="—" class="hl-input pr-10">
+                                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-hyper-muted font-mono">$</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pt-2">
+                            <div class="flex items-center justify-between mb-3">
+                                <label class="text-[12px] text-hyper-muted2">Leverage</label>
+                                <span id="leverageValue" class="text-hyper-teal font-mono font-bold text-lg">10x</span>
+                            </div>
+                            <input type="range" id="leverage" class="hl-slider" min="1" max="100" value="10" step="1">
+                            <div class="flex justify-between mt-2 text-[10px] text-hyper-muted font-mono">
+                                <span>1x</span><span>25x</span><span>50x</span><span>75x</span><span>100x</span>
+                            </div>
+                            <div class="grid grid-cols-5 gap-2 mt-3">
+                                <button type="button" class="preset-btn text-[11px] py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-white hover:border-hyper-borderLight transition-colors" data-lev="2">2x</button>
+                                <button type="button" class="preset-btn text-[11px] py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-white hover:border-hyper-borderLight transition-colors" data-lev="5">5x</button>
+                                <button type="button" class="preset-btn text-[11px] py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-white hover:border-hyper-borderLight transition-colors" data-lev="10">10x</button>
+                                <button type="button" class="preset-btn text-[11px] py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-white hover:border-hyper-borderLight transition-colors" data-lev="25">25x</button>
+                                <button type="button" class="preset-btn text-[11px] py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-white hover:border-hyper-borderLight transition-colors" data-lev="50">50x</button>
+                            </div>
+                        </div>
+
+                        <details class="adv-settings" id="advSettings">
+                            <summary class="cursor-pointer flex items-center justify-between py-3 px-3 -mx-3 text-[12px] text-hyper-muted2 hover:text-white transition-colors border-t border-hyper-border mt-2">
+                                <span class="flex items-center gap-2">
+                                    <svg class="arrow-icon w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M7 5l6 5-6 5V5z"/></svg>
+                                    <span class="font-semibold uppercase tracking-wider text-[11px]">Advanced Settings</span>
+                                </span>
+                                <span id="advSummary" class="text-[10px] text-hyper-muted font-mono">R:R Auto</span>
+                            </summary>
+                            <div class="p-4 mt-2 bg-hyper-bg/40 border border-hyper-border rounded-lg space-y-4">
+                                <div>
+                                    <label class="block text-[12px] text-hyper-muted2 mb-2">Risk : Reward Ratio</label>
+                                    <div class="seg-group" id="rrPresets">
+                                        <button type="button" class="seg-btn active" data-rr="auto">Auto</button>
+                                        <button type="button" class="seg-btn" data-rr="1">1:1</button>
+                                        <button type="button" class="seg-btn" data-rr="1.5">1:1.5</button>
+                                        <button type="button" class="seg-btn" data-rr="2">1:2</button>
+                                        <button type="button" class="seg-btn" data-rr="3">1:3</button>
+                                        <button type="button" class="seg-btn" data-rr="4">1:4</button>
+                                    </div>
+                                    <p class="text-[10px] text-hyper-muted mt-2 leading-relaxed">
+                                        When set, Take Profit auto-calculates as <span class="text-hyper-teal font-mono">Risk × R:R</span> from your stop distance.
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-hyper-muted2 mb-2">Custom R:R (overrides preset)</label>
+                                    <input type="number" id="customRR" step="0.1" placeholder="e.g. 2.5" class="hl-input">
+                                </div>
+                                <div class="flex items-center justify-between pt-2 border-t border-hyper-border">
+                                    <div>
+                                        <div class="text-[12px] text-hyper-muted2">Include trading fees in R:R</div>
+                                        <div class="text-[10px] text-hyper-muted mt-0.5">0.045% taker fee per side (Hyperliquid)</div>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="includeFees" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-hyper-border rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-hyper-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-hyper-teal peer-checked:after:bg-hyper-bg"></div>
+                                    </label>
+                                </div>
+                                <div class="flex gap-2 pt-2 border-t border-hyper-border">
+                                    <button type="button" id="saveBtn" class="flex-1 text-[11px] py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider font-semibold">Save State</button>
+                                    <button type="button" id="resetBtn" class="flex-1 text-[11px] py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-red hover:border-hyper-red transition-colors uppercase tracking-wider font-semibold">Reset All</button>
+                                </div>
+                            </div>
+                        </details>
+
+                        <button type="submit" class="w-full mt-4 bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3.5 rounded-lg transition-all duration-200 text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(80,210,193,0.15)] hover:shadow-[0_0_25px_rgba(80,210,193,0.3)]">
+                            Calculate Position
+                        </button>
+                    </form>
+
+                    <div id="resultsPanel" class="hidden border-t border-hyper-border p-4 bg-hyper-card">
+                        <div id="errorMessage" class="hidden bg-hyper-red/10 border border-hyper-red/40 text-hyper-red text-xs p-3 rounded-md mb-4"></div>
+                        <div id="warningMessage" class="hidden bg-yellow-500/10 border border-yellow-500/40 text-yellow-400 text-xs p-3 rounded-md mb-4"></div>
+
+                        <div class="mb-4 pb-4 border-b border-hyper-border flex items-end justify-between flex-wrap gap-3">
+                            <div>
+                                <div class="text-[11px] text-hyper-muted uppercase tracking-wider mb-1">Position Size</div>
+                                <div id="resPositionSize" class="text-3xl font-bold text-white font-mono tracking-tight">$0.00</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-[11px] text-hyper-muted uppercase tracking-wider mb-1">Risk : Reward</div>
+                                <div id="resRRBadge" class="rr-badge good">R:R 0.00</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-5">
+                            <div class="flex justify-between text-[10px] text-hyper-muted mb-1.5 font-mono uppercase tracking-wider">
+                                <span class="text-hyper-red">Risk</span>
+                                <span class="text-hyper-muted2" id="resRRText">0.00 R</span>
+                                <span class="text-hyper-teal">Reward</span>
+                            </div>
+                            <div class="rr-bar">
+                                <div id="rrBarRisk" class="rr-bar-risk" style="width:50%"></div>
+                                <div id="rrBarReward" class="rr-bar-reward" style="width:50%"></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Price Levels</div>
+                            <div class="space-y-0 text-[13px]">
+                                <div class="result-row"><span class="text-hyper-muted2">Entry</span><span id="resEntry" class="text-hyper-text font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Stop Loss</span><span id="resSL" class="text-hyper-red font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Take Profit</span><span id="resTP" class="text-hyper-teal font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Est. Liquidation</span><span id="resLiq" class="text-hyper-yellow font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Breakeven (after fees)</span><span id="resBreakeven" class="text-hyper-muted2 font-mono font-medium">$0.00</span></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Distances</div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="bg-hyper-bg border border-hyper-border rounded-md p-3">
+                                    <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Stop Distance</div>
+                                    <div id="resStopDistance" class="text-lg font-bold text-hyper-red font-mono">0.00%</div>
+                                </div>
+                                <div class="bg-hyper-bg border border-hyper-border rounded-md p-3">
+                                    <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">TP Distance</div>
+                                    <div id="resTPDistance" class="text-lg font-bold text-hyper-teal font-mono">0.00%</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">P&L</div>
+                            <div class="space-y-0 text-[13px]">
+                                <div class="result-row"><span class="text-hyper-muted2">Risk Amount</span><span id="resRiskAmount" class="text-hyper-red font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Potential Profit</span><span id="resPotentialProfit" class="text-hyper-teal font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Est. Fees (open + close)</span><span id="resFees" class="text-hyper-muted2 font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Net Profit (after fees)</span><span id="resNetProfit" class="text-hyper-teal font-mono font-medium">$0.00</span></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Position & Margin</div>
+                            <div class="space-y-0 text-[13px]">
+                                <div class="result-row"><span class="text-hyper-muted2">Order Value</span><span id="resOrderValue" class="text-hyper-text font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Margin Required</span><span id="resMargin" class="text-hyper-teal font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Margin Usage</span><span id="resMarginUsage" class="text-hyper-text font-mono font-medium">0.0%</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Free Margin After</span><span id="resFreeMargin" class="text-hyper-text font-mono font-medium">$0.00</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Quantity</span><span id="resQuantity" class="text-hyper-text font-mono font-medium">0.000000</span></div>
+                                <div class="result-row"><span class="text-hyper-muted2">Leverage</span><span id="resLeverage" class="text-hyper-text font-mono font-medium">1x</span></div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 mb-2">
+                            <button type="button" id="copyResultsBtn" class="flex-1 text-[11px] py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider font-semibold">Copy Results</button>
+                            <a href="https://app.hyperliquid.xyz/join/BENGALCAT4" target="_blank" rel="noopener" class="flex-1 text-center bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-2 rounded-md transition-colors text-[11px] uppercase tracking-wider">Trade on Hyperliquid →</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5">
+                    <h3 class="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-hyper-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        How it works
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[12px] text-hyper-muted2 leading-relaxed">
+                        <div>
+                            <div class="text-hyper-teal font-semibold mb-1">1. Enter risk</div>
+                            Set how much you're willing to lose on this trade ($5, $10, or 1% of margin). Stop Loss auto-calculates.
+                        </div>
+                        <div>
+                            <div class="text-hyper-teal font-semibold mb-1">2. Set R:R (optional)</div>
+                            In Advanced, pick 1:2 or 1:3 — Take Profit auto-sets to your desired reward ratio.
+                        </div>
+                        <div>
+                            <div class="text-hyper-teal font-semibold mb-1">3. Place the order</div>
+                            Copy the Stop Loss and Take Profit prices straight to Hyperliquid. Size, margin, and liquidation all shown.
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ===== RIGHT: SIDEBAR ===== -->
+            <div class="lg:col-span-1 space-y-5">
+
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 relative overflow-hidden">
+                    <div class="absolute -top-6 -right-6 w-32 h-32 bg-hyper-teal rounded-full filter blur-[80px] opacity-[0.12]"></div>
+                    <div class="relative">
+                        <div class="flex items-center gap-2 mb-3">
+                            <div class="w-7 h-7 rounded bg-hyper-teal/20 flex items-center justify-center text-hyper-teal text-xs font-bold">H</div>
+                            <h3 class="text-base font-bold text-white">New to Hyperliquid?</h3>
+                        </div>
+                        <p class="text-[13px] text-hyper-muted2 mb-4 leading-relaxed">
+                            Trade perpetuals with deep liquidity. Get a <span class="text-hyper-teal font-semibold">5% discount</span> on all fees via our partner link.
+                        </p>
+                        <a href="https://app.hyperliquid.xyz/join/BENGALCAT4" target="_blank" rel="noopener" class="block w-full text-center bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 rounded-lg transition-colors text-[12px] uppercase tracking-wider">
+                            Register on Hyperliquid
+                        </a>
+                        <div class="mt-3 text-[10px] text-hyper-muted font-mono text-center truncate">app.hyperliquid.xyz/join/BENGALCAT4</div>
+                    </div>
+                </div>
+
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5">
+                    <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-hyper-yellow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        Risk Disclaimer
+                    </h3>
+                    <p class="text-[11px] text-hyper-muted2 leading-relaxed">
+                        Leveraged trading involves substantial risk. This calculator is a planning tool — not financial advice. Always verify prices on the exchange before executing.
+                    </p>
+                </div>
+
+                <!-- ===== DONATE (с QR-модалкой) ===== -->
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5">
+                    <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-hyper-red" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"></path></svg>
+                        Support the Project
+                    </h3>
+                    <p class="text-[12px] text-hyper-muted2 mb-3 leading-relaxed">This tool is 100% free and has no ads. If it saved you a trade, consider a small donation. Click for QR.</p>
+
+                    <div class="space-y-2">
+                        <div class="wallet-card bg-hyper-bg px-3 py-3 rounded-md border border-hyper-border flex justify-between items-center text-[11px]"
+                             data-wallet="0x6F97071B375D35Af144FC0cB8AD832322393Ae12"
+                             data-label="USDT (ERC-20)"
+                             data-network="Ethereum / ERC-20">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-hyper-muted flex-shrink-0">USDT (ERC-20)</span>
+                            </div>
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-hyper-text font-mono truncate">0x6F9707...93Ae12</span>
+                                <svg class="wallet-hint w-3 h-3 text-hyper-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                            </div>
+                        </div>
+
+                        <div class="wallet-card bg-hyper-bg px-3 py-3 rounded-md border border-hyper-border flex justify-between items-center text-[11px]"
+                             data-wallet="bc1qdcczgt55v9lqcdmc3pxdm40tgqm2psqmtq3nft"
+                             data-label="Bitcoin (BTC)"
+                             data-network="Bitcoin Network">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-hyper-muted flex-shrink-0">BTC</span>
+                            </div>
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-hyper-text font-mono truncate">bc1qdcc...mtq3nft</span>
+                                <svg class="wallet-hint w-3 h-3 text-hyper-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <footer class="border-t border-hyper-border bg-hyper-bg py-6 text-center text-[11px] text-hyper-muted">
+        <div class="flex flex-wrap justify-center gap-4 mb-2">
+            <a href="/" class="hover:text-hyper-teal transition-colors">Home</a>
+            <a href="/bitcoin-risk-calculator" class="hover:text-hyper-teal transition-colors">Bitcoin</a>
+            <a href="/bybit-calculator" class="hover:text-hyper-teal transition-colors">Bybit</a>
+            <a href="/hyperliquid-calculator" class="hover:text-hyper-teal transition-colors">Hyperliquid</a>
+        </div>
+        <p>&copy; 2026 RiskCalc — Free tool for crypto traders. Not financial advice.</p>
+    </footer>
+
+    <!-- ===== QR MODAL ===== -->
+    <div id="qrModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div class="bg-hyper-panel border border-hyper-border rounded-2xl max-w-sm w-full p-6 relative animate-modal-in">
+            <button id="qrModalClose" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-hyper-bg hover:bg-hyper-border flex items-center justify-center text-hyper-muted hover:text-white transition-colors" aria-label="Close">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <div class="text-center mb-4">
+                <div class="text-[10px] text-hyper-muted uppercase tracking-[0.2em] mb-1">Support the Project</div>
+                <h3 id="qrModalTitle" class="text-lg font-bold text-white">USDT (ERC-20)</h3>
+                <div id="qrModalNetwork" class="text-[11px] text-hyper-muted font-mono mt-0.5">Ethereum Network</div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 mb-4 flex items-center justify-center min-h-[260px]" id="qrCodeContainer">
+                <div id="qrcode"></div>
+            </div>
+
+            <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1.5 text-center">Wallet Address</div>
+            <div id="qrModalAddress" class="bg-hyper-bg border border-hyper-border rounded-md px-3 py-3 text-[11px] font-mono break-all text-center text-hyper-text mb-3"></div>
+
+            <button id="qrModalCopy" class="w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 rounded-lg transition-colors text-[12px] uppercase tracking-wider">
+                Copy Address
+            </button>
+
+            <p class="text-[10px] text-hyper-muted text-center mt-3 leading-relaxed">
+                Scan the QR with your wallet app, or copy the address. Thank you! 💚
+            </p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <script>
+        // ===== SEO OVERRIDE по URL =====
+        const SEO = {
+            '/': {
+                title: 'Free Crypto Risk & Position Size Calculator — Bitcoin, Bybit, Hyperliquid',
+                desc: 'Calculate exact position size, margin, and risk for Bitcoin and crypto futures. Free tool for Bybit, Hyperliquid, and Binance traders.',
+                keywords: 'crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator'
+            },
+            '/bitcoin-risk-calculator': {
+                title: 'Bitcoin Risk Calculator — Calculate BTC Position Size & Stop Loss',
+                desc: 'Free Bitcoin risk calculator. Determine exact BTC position size, margin, and stop-loss based on your risk amount ($5, $10, or 1% of your account).',
+                keywords: 'bitcoin risk calculator, bitcoin position size calculator, btc trade calculator, bitcoin stop loss calculator'
+            },
+            '/bybit-calculator': {
+                title: 'Bybit Position Size Calculator — Risk & Margin Tool',
+                desc: 'Free Bybit calculator for futures traders. Plan your trade by calculating position size, required margin, and risk per trade before opening a position.',
+                keywords: 'bybit position size calculator, bybit risk calculator, bybit margin calculator, bybit leverage calculator'
+            },
+            '/hyperliquid-calculator': {
+                title: 'Hyperliquid Risk & Position Size Calculator — Free Tool',
+                desc: 'Free Hyperliquid calculator. Calculate position size and required margin based on your risk tolerance for HYPE and other perpetual futures.',
+                keywords: 'hyperliquid calculator, hyperliquid position size, hype risk calculator, hyperliquid leverage calculator'
+            }
+        };
+
+        (function applySeo() {
+            const path = window.location.pathname.replace(/\/$/, '') || '/';
+            const meta = SEO[path] || SEO['/'];
+            document.title = meta.title;
+            const setMeta = (name, content) => {
+                let el = document.querySelector(`meta[name="${name}"]`);
+                if (!el) { el = document.createElement('meta'); el.setAttribute('name', name); document.head.appendChild(el); }
+                el.setAttribute('content', content);
+            };
+            setMeta('description', meta.desc);
+            setMeta('keywords', meta.keywords);
+        })();
+
+        // ===== Активы =====
+        const ASSETS = [
+            { symbol:'BTC',  name:'Bitcoin',     price:95000 },
+            { symbol:'ETH',  name:'Ethereum',    price:3400 },
+            { symbol:'SOL',  name:'Solana',      price:180 },
+            { symbol:'HYPE', name:'Hyperliquid', price:35 },
+            { symbol:'BNB',  name:'BNB',         price:650 },
+            { symbol:'XRP',  name:'XRP',         price:2.3 },
+            { symbol:'DOGE', name:'Dogecoin',    price:0.32 },
+            { symbol:'LINK', name:'Chainlink',   price:22 },
+            { symbol:'AVAX', name:'Avalanche',   price:42 },
+            { symbol:'ARB',  name:'Arbitrum',    price:0.85 },
+            { symbol:'SUI',  name:'Sui',         price:3.5 },
+            { symbol:'TIA',  name:'Celestia',    price:6.5 },
+            { symbol:'CUSTOM', name:'Custom',    price:null },
+        ];
+
+        let currentAsset = 'BTC';
+        let riskMode = 'amount';
+        let direction = 'long';
+        let rrMode = 'auto';
+        const TAKER_FEE = 0.00045;
+        const STORAGE_KEY = 'riskcalc_state_v1';
+
+        // ===== Рендер активов =====
+        const assetScroll = document.getElementById('assetScroll');
+        ASSETS.forEach(a => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'asset-btn' + (a.symbol === 'BTC' ? ' active' : '');
+            btn.dataset.symbol = a.symbol;
+            btn.dataset.price = a.price !== null ? a.price : '';
+            btn.innerHTML = `<span class="asset-dot"></span><span>${a.symbol}</span>`;
+            btn.title = a.name + (a.price ? ' · ~$' + a.price : '');
+            assetScroll.appendChild(btn);
+        });
+
+        assetScroll.addEventListener('click', (e) => {
+            const btn = e.target.closest('.asset-btn');
+            if (!btn) return;
+            document.querySelectorAll('.asset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentAsset = btn.dataset.symbol;
+            const price = btn.dataset.price;
+            if (price) {
+                document.getElementById('entryPrice').value = parseFloat(price);
+                autoCompute();
+            } else {
+                document.getElementById('entryPrice').value = '';
+                document.getElementById('stopLoss').value = '';
+                document.getElementById('takeProfit').value = '';
+                document.getElementById('entryPrice').focus();
+            }
+        });
+
+        // ===== Слайдер =====
+        const slider = document.getElementById('leverage');
+        const levValueEl = document.getElementById('leverageValue');
+        function updateSliderUI() {
+            const val = parseFloat(slider.value);
+            const pct = ((val - slider.min) / (slider.max - slider.min)) * 100;
+            slider.style.setProperty('--progress', pct + '%');
+            levValueEl.textContent = val + 'x';
+        }
+        slider.addEventListener('input', () => { updateSliderUI(); autoCompute(); });
+        updateSliderUI();
+
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                slider.value = btn.dataset.lev;
+                updateSliderUI();
+                autoCompute();
+            });
+        });
+
+        // ===== Risk mode =====
+        document.querySelectorAll('[data-risk]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('[data-risk]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                riskMode = btn.dataset.risk;
+                document.getElementById('riskSuffix').textContent = riskMode === 'percent' ? '%' : '$';
+                autoCompute();
+            });
+        });
+
+        document.querySelectorAll('.risk-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.dataset.type;
+                riskMode = type;
+                document.querySelectorAll('[data-risk]').forEach(b => b.classList.toggle('active', b.dataset.risk === type));
+                document.getElementById('riskSuffix').textContent = type === 'percent' ? '%' : '$';
+                document.getElementById('riskValue').value = btn.dataset.val;
+                autoCompute();
+            });
+        });
+
+        document.getElementById('clearRisk').addEventListener('click', () => {
+            document.getElementById('riskValue').value = '';
+            document.getElementById('slAutoBadge').classList.add('hidden-badge');
+            document.getElementById('tpAutoBadge').classList.add('hidden-badge');
+            document.getElementById('stopLoss').classList.remove('auto-computed','stop-field');
+            document.getElementById('takeProfit').classList.remove('auto-computed');
+            autoCompute();
+        });
+
+        // ===== Direction =====
+        const btnLong = document.getElementById('btnLong');
+        const btnShort = document.getElementById('btnShort');
+        btnLong.addEventListener('click', () => {
+            direction = 'long';
+            btnLong.classList.add('active-long');
+            btnShort.classList.remove('active-short');
+            autoCompute();
+        });
+        btnShort.addEventListener('click', () => {
+            direction = 'short';
+            btnShort.classList.add('active-short');
+            btnLong.classList.remove('active-long');
+            autoCompute();
+        });
+
+        // ===== Top pills =====
+        document.querySelectorAll('.seg-group .seg-btn[data-mode]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.seg-group .seg-btn[data-mode]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // ===== Own Margin =====
+        const ownMarginInput = document.getElementById('ownMargin');
+        function updateMarginDisplays() {
+            const v = parseFloat(ownMarginInput.value) || 0;
+            const fmt = v.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+            document.getElementById('availDisplay').textContent = fmt + ' USDC';
+            document.getElementById('marginDisplay').textContent = fmt + ' USDC';
+        }
+        ownMarginInput.addEventListener('input', () => { updateMarginDisplays(); autoCompute(); });
+        updateMarginDisplays();
+
+        // ===== R:R presets =====
+        document.querySelectorAll('#rrPresets .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#rrPresets .seg-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                rrMode = btn.dataset.rr;
+                document.getElementById('customRR').value = '';
+                updateAdvSummary();
+                autoCompute();
+            });
+        });
+
+        document.getElementById('customRR').addEventListener('input', function() {
+            const v = parseFloat(this.value);
+            if (!isNaN(v) && v > 0) {
+                rrMode = String(v);
+                document.querySelectorAll('#rrPresets .seg-btn').forEach(b => b.classList.remove('active'));
+            } else {
+                rrMode = 'auto';
+                document.querySelectorAll('#rrPresets .seg-btn').forEach(b => b.classList.remove('active'));
+                document.querySelector('#rrPresets .seg-btn[data-rr="auto"]').classList.add('active');
+            }
+            updateAdvSummary();
+            autoCompute();
+        });
+
+        function updateAdvSummary() {
+            document.getElementById('advSummary').textContent = rrMode === 'auto' ? 'R:R Auto' : 'R:R 1:' + rrMode;
+        }
+
+        // ===== Auto compute =====
+        function autoCompute() {
+            const riskVal = parseFloat(document.getElementById('riskValue').value);
+            const slInput = document.getElementById('stopLoss');
+            const tpInput = document.getElementById('takeProfit');
+            const slBadge = document.getElementById('slAutoBadge');
+            const tpBadge = document.getElementById('tpAutoBadge');
+
+            if (isNaN(riskVal) || riskVal <= 0) {
+                slBadge.classList.add('hidden-badge');
+                tpBadge.classList.add('hidden-badge');
+                slInput.classList.remove('auto-computed','stop-field');
+                tpInput.classList.remove('auto-computed');
+                return;
+            }
+
+            const margin = parseFloat(ownMarginInput.value);
+            const entry = parseFloat(document.getElementById('entryPrice').value);
+            const lev = parseFloat(slider.value);
+            if (!margin || !entry || !lev || margin <= 0 || entry <= 0 || lev <= 0) return;
+
+            const riskAmount = riskMode === 'percent' ? margin * (riskVal / 100) : riskVal;
+            if (riskAmount <= 0) return;
+
+            const positionSize = margin * lev;
+            const stopDistancePct = (riskAmount / positionSize) * 100;
+
+            const sl = direction === 'long'
+                ? entry * (1 - stopDistancePct / 100)
+                : entry * (1 + stopDistancePct / 100);
+
+            const roundPrice = (p) => p >= 1000 ? +p.toFixed(2) : p >= 10 ? +p.toFixed(3) : +p.toFixed(6);
+            slInput.value = roundPrice(sl);
+            slInput.classList.add('auto-computed','stop-field');
+            slBadge.classList.remove('hidden-badge');
+
+            if (rrMode !== 'auto') {
+                const rr = parseFloat(rrMode);
+                if (!isNaN(rr) && rr > 0) {
+                    const tpDistancePct = stopDistancePct * rr;
+                    const tp = direction === 'long'
+                        ? entry * (1 + tpDistancePct / 100)
+                        : entry * (1 - tpDistancePct / 100);
+                    tpInput.value = roundPrice(tp);
+                    tpInput.classList.add('auto-computed');
+                    tpBadge.classList.remove('hidden-badge');
+                }
+            } else {
+                tpInput.classList.remove('auto-computed');
+                tpBadge.classList.add('hidden-badge');
+            }
+        }
+
+        document.getElementById('riskValue').addEventListener('input', autoCompute);
+        document.getElementById('entryPrice').addEventListener('input', autoCompute);
+
+        // ===== Storage =====
+        function getFormState() {
+            return {
+                ownMargin: ownMarginInput.value,
+                riskValue: document.getElementById('riskValue').value,
+                riskMode, entryPrice: document.getElementById('entryPrice').value,
+                stopLoss: document.getElementById('stopLoss').value,
+                takeProfit: document.getElementById('takeProfit').value,
+                leverage: slider.value,
+                direction, rrMode, currentAsset,
+                includeFees: document.getElementById('includeFees').checked,
+            };
+        }
+
+        function applyFormState(s) {
+            if (!s) return;
+            if (s.ownMargin) ownMarginInput.value = s.ownMargin;
+            if (s.riskValue) document.getElementById('riskValue').value = s.riskValue;
+            if (s.entryPrice) document.getElementById('entryPrice').value = s.entryPrice;
+            if (s.stopLoss) document.getElementById('stopLoss').value = s.stopLoss;
+            if (s.takeProfit) document.getElementById('takeProfit').value = s.takeProfit;
+            if (s.leverage) slider.value = s.leverage;
+            if (s.includeFees) document.getElementById('includeFees').checked = true;
+
+            if (s.riskMode) {
+                riskMode = s.riskMode;
+                document.querySelectorAll('[data-risk]').forEach(b => b.classList.toggle('active', b.dataset.risk === riskMode));
+                document.getElementById('riskSuffix').textContent = riskMode === 'percent' ? '%' : '$';
+            }
+            if (s.direction === 'short') {
+                direction = 'short';
+                btnShort.classList.add('active-short');
+                btnLong.classList.remove('active-long');
+            }
+            if (s.currentAsset) {
+                currentAsset = s.currentAsset;
+                document.querySelectorAll('.asset-btn').forEach(b => b.classList.toggle('active', b.dataset.symbol === currentAsset));
+            }
+            if (s.rrMode) {
+                rrMode = s.rrMode;
+                if (rrMode === 'auto') {
+                    document.querySelectorAll('#rrPresets .seg-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelector('#rrPresets .seg-btn[data-rr="auto"]').classList.add('active');
+                    document.getElementById('customRR').value = '';
+                } else {
+                    document.querySelectorAll('#rrPresets .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.rr === rrMode));
+                    if (!document.querySelector('#rrPresets .seg-btn.active')) {
+                        document.getElementById('customRR').value = rrMode;
+                    }
+                }
+                updateAdvSummary();
+            }
+            updateSliderUI();
+            updateMarginDisplays();
+        }
+
+        document.getElementById('saveBtn').addEventListener('click', () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(getFormState()));
+            const btn = document.getElementById('saveBtn');
+            const orig = btn.textContent;
+            btn.textContent = '✓ Saved';
+            btn.classList.add('text-hyper-teal','border-hyper-teal');
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('text-hyper-teal','border-hyper-teal'); }, 1200);
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            if (!confirm('Reset all inputs to defaults?')) return;
+            localStorage.removeItem(STORAGE_KEY);
+            location.reload();
+        });
+
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) applyFormState(JSON.parse(saved));
+        } catch(e) {}
+
+        setInterval(() => {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(getFormState())); } catch(e) {}
+        }, 5000);
+
+        // ===== QR MODAL =====
+        const qrModal = document.getElementById('qrModal');
+        const qrCodeContainer = document.getElementById('qrcode');
+        const qrModalTitle = document.getElementById('qrModalTitle');
+        const qrModalNetwork = document.getElementById('qrModalNetwork');
+        const qrModalAddress = document.getElementById('qrModalAddress');
+        const qrModalCopy = document.getElementById('qrModalCopy');
+        let currentWallet = '';
+
+        function openQrModal(wallet, label, network) {
+            currentWallet = wallet;
+            qrModalTitle.textContent = label;
+            qrModalNetwork.textContent = network;
+            qrModalAddress.textContent = wallet;
+
+            // Генерим QR через qrcode-generator
+            qrCodeContainer.innerHTML = '';
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(wallet);
+                qr.make();
+                // SVG — нативно масштабируется
+                const svg = qr.createSvgTag({ cellSize: 5, margin: 0, scalable: true });
+                qrCodeContainer.innerHTML = svg;
+                const svgEl = qrCodeContainer.querySelector('svg');
+                if (svgEl) {
+                    svgEl.setAttribute('width', '220');
+                    svgEl.setAttribute('height', '220');
+                    svgEl.style.display = 'block';
+                }
+            } catch(e) {
+                // Fallback: внешний сервис
+                qrCodeContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(wallet)}" alt="QR" width="220" height="220">`;
+            }
+
+            qrModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeQrModal() {
+            qrModal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+
+        document.querySelectorAll('.wallet-card').forEach(card => {
+            card.addEventListener('click', () => {
+                openQrModal(card.dataset.wallet, card.dataset.label, card.dataset.network);
+            });
+        });
+
+        document.getElementById('qrModalClose').addEventListener('click', closeQrModal);
+        qrModal.addEventListener('click', (e) => { if (e.target === qrModal) closeQrModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !qrModal.classList.contains('hidden')) closeQrModal(); });
+
+        qrModalCopy.addEventListener('click', () => {
+            navigator.clipboard.writeText(currentWallet).then(() => {
+                const orig = qrModalCopy.textContent;
+                qrModalCopy.textContent = '✓ Copied!';
+                setTimeout(() => { qrModalCopy.textContent = orig; }, 1500);
+            });
+        });
+
+        // ===== CALCULATE =====
+        document.getElementById('calcForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const margin = parseFloat(ownMarginInput.value);
+            const riskRaw = parseFloat(document.getElementById('riskValue').value);
+            const riskProvided = !isNaN(riskRaw) && riskRaw > 0;
+            const entry = parseFloat(document.getElementById('entryPrice').value);
+            let sl = parseFloat(document.getElementById('stopLoss').value);
+            let tp = parseFloat(document.getElementById('takeProfit').value);
+            const lev = parseFloat(slider.value);
+            const includeFees = document.getElementById('includeFees').checked;
+
+            const panel = document.getElementById('resultsPanel');
+            const errorMsg = document.getElementById('errorMessage');
+            const warnMsg = document.getElementById('warningMessage');
+
+            errorMsg.classList.add('hidden');
+            warnMsg.classList.add('hidden');
+            panel.classList.remove('hidden');
+
+            if (!margin || margin <= 0 || !entry || entry <= 0 || !lev || lev <= 0) {
+                errorMsg.textContent = 'Own Margin, Entry Price and Leverage must be greater than zero.';
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            if (riskProvided) {
+                autoCompute();
+                sl = parseFloat(document.getElementById('stopLoss').value);
+                tp = parseFloat(document.getElementById('takeProfit').value);
+            }
+
+            if (!sl || sl <= 0) {
+                errorMsg.textContent = 'Stop Loss is required. Fill Risk per Trade to auto-calculate it, or enter manually.';
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+            if (entry === sl) {
+                errorMsg.textContent = 'Entry price and Stop Loss cannot be equal.';
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            const stopDistancePct = Math.abs(entry - sl) / entry * 100;
+
+            let riskAmount;
+            if (riskProvided) {
+                riskAmount = riskMode === 'percent' ? margin * (riskRaw / 100) : riskRaw;
+            } else {
+                const posForRisk = margin * lev;
+                riskAmount = posForRisk * (stopDistancePct / 100);
+            }
+
+            const positionSize = margin * lev;
+            const marginRequired = positionSize / lev;
+            const quantity = positionSize / entry;
+
+            let tpDistancePct = 0, potentialProfit = 0, rrRatio = 0;
+            if (tp && tp > 0 && tp !== entry) {
+                tpDistancePct = Math.abs(tp - entry) / entry * 100;
+                potentialProfit = positionSize * (tpDistancePct / 100);
+                rrRatio = stopDistancePct > 0 ? (tpDistancePct / stopDistancePct) : 0;
+            }
+
+            const liq = direction === 'long'
+                ? entry * (1 - 1 / lev)
+                : entry * (1 + 1 / lev);
+
+            const totalFees = positionSize * TAKER_FEE * 2;
+            const breakeven = direction === 'long'
+                ? entry + (totalFees / quantity)
+                : entry - (totalFees / quantity);
+            const netProfit = potentialProfit - totalFees;
+            const marginUsage = (marginRequired / margin) * 100;
+            const freeMargin = margin - marginRequired;
+
+            const warnings = [];
+            if (direction === 'long' && sl >= entry) warnings.push('For a LONG, Stop Loss should be BELOW entry.');
+            if (direction === 'short' && sl <= entry) warnings.push('For a SHORT, Stop Loss should be ABOVE entry.');
+            if (direction === 'long' && tp && tp > 0 && tp <= entry) warnings.push('For a LONG, Take Profit should be ABOVE entry.');
+            if (direction === 'short' && tp && tp > 0 && tp >= entry) warnings.push('For a SHORT, Take Profit should be BELOW entry.');
+            if (stopDistancePct < 0.15) warnings.push('Stop distance is very tight (<0.15%). Likely to be liquidated by noise.');
+            if (stopDistancePct > 10) warnings.push('Stop distance is very wide (>10%). Consider increasing leverage or reducing risk.');
+            if (lev >= 50) warnings.push('High leverage (≥50x). Liquidation risk is extreme.');
+            if (includeFees && rrRatio > 0 && rrRatio < 1.5) warnings.push('R:R below 1.5 — after fees, edge is minimal.');
+
+            if (warnings.length > 0) {
+                warnMsg.innerHTML = '⚠ ' + warnings.join('<br>⚠ ');
+                warnMsg.classList.remove('hidden');
+            }
+
+            const fmt = (n, d=2) => n.toLocaleString(undefined, {minimumFractionDigits:d, maximumFractionDigits:d});
+            const fmtP = (p) => p >= 1000 ? '$' + p.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : p >= 1 ? '$' + p.toFixed(4) : '$' + p.toFixed(6);
+
+            document.getElementById('resPositionSize').textContent = '$' + fmt(positionSize);
+            document.getElementById('resEntry').textContent = fmtP(entry);
+            document.getElementById('resSL').textContent = fmtP(sl);
+            document.getElementById('resTP').textContent = tp && tp > 0 ? fmtP(tp) : '—';
+            document.getElementById('resLiq').textContent = fmtP(liq);
+            document.getElementById('resBreakeven').textContent = fmtP(breakeven);
+            document.getElementById('resStopDistance').textContent = stopDistancePct.toFixed(2) + '%';
+            document.getElementById('resTPDistance').textContent = tpDistancePct > 0 ? tpDistancePct.toFixed(2) + '%' : '—';
+            document.getElementById('resRiskAmount').textContent = '$' + fmt(riskAmount);
+            document.getElementById('resPotentialProfit').textContent = potentialProfit > 0 ? '$' + fmt(potentialProfit) : '—';
+            document.getElementById('resFees').textContent = '$' + fmt(totalFees, 4);
+            document.getElementById('resNetProfit').textContent = potentialProfit > 0 ? '$' + fmt(netProfit) : '—';
+            document.getElementById('resOrderValue').textContent = '$' + fmt(positionSize);
+            document.getElementById('resMargin').textContent = '$' + fmt(marginRequired);
+            document.getElementById('resMarginUsage').textContent = marginUsage.toFixed(1) + '%';
+            document.getElementById('resFreeMargin').textContent = '$' + fmt(freeMargin);
+            document.getElementById('resQuantity').textContent = quantity.toFixed(6);
+            document.getElementById('resLeverage').textContent = lev + 'x';
+
+            const badge = document.getElementById('resRRBadge');
+            if (rrRatio > 0) {
+                badge.textContent = 'R:R 1:' + rrRatio.toFixed(2);
+                badge.classList.remove('good','warn','bad');
+                if (rrRatio >= 2) badge.classList.add('good');
+                else if (rrRatio >= 1) badge.classList.add('warn');
+                else badge.classList.add('bad');
+            } else {
+                badge.textContent = 'R:R —';
+                badge.classList.remove('good','warn','bad');
+                badge.classList.add('warn');
+            }
+
+            if (tpDistancePct > 0) {
+                const total = stopDistancePct + tpDistancePct;
+                const riskPct = total > 0 ? (stopDistancePct / total) * 100 : 50;
+                document.getElementById('rrBarRisk').style.width = riskPct + '%';
+                document.getElementById('rrBarReward').style.width = (100 - riskPct) + '%';
+                document.getElementById('resRRText').textContent = rrRatio.toFixed(2) + ' R';
+            } else {
+                document.getElementById('rrBarRisk').style.width = '50%';
+                document.getElementById('rrBarReward').style.width = '50%';
+                document.getElementById('resRRText').textContent = '—';
+            }
+
+            panel.classList.remove('animate-fade-in');
+            void panel.offsetWidth;
+            panel.classList.add('animate-fade-in');
+            panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+            window.__lastResult = {
+                direction, entry, sl, tp, lev,
+                positionSize, quantity, riskAmount, potentialProfit,
+                rrRatio, liq, breakeven, totalFees, netProfit,
+            };
+        });
+
+        // ===== Copy results =====
+        document.getElementById('copyResultsBtn').addEventListener('click', function() {
+            const r = window.__lastResult;
+            if (!r) return;
+            const dir = r.direction.toUpperCase();
+            const txt =
+`⚡ RiskCalc — Trade Plan
+Direction: ${dir}
+Entry: ${r.entry}
+Stop Loss: ${r.sl}
+Take Profit: ${r.tp || '—'}
+
+Leverage: ${r.lev}x
+Position Size: $${r.positionSize.toFixed(2)}
+Quantity: ${r.quantity.toFixed(6)}
+
+Risk: $${r.riskAmount.toFixed(2)}
+Potential Profit: $${r.potentialProfit.toFixed(2)}
+R:R: ${r.rrRatio > 0 ? '1:' + r.rrRatio.toFixed(2) : '—'}
+Est. Liquidation: ${r.liq.toFixed(6)}
+
+Fees: $${r.totalFees.toFixed(4)}
+Breakeven: ${r.breakeven.toFixed(6)}`;
+            navigator.clipboard.writeText(txt).then(() => {
+                const btn = this;
+                const orig = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                btn.classList.add('text-hyper-teal','border-hyper-teal');
+                setTimeout(() => { btn.textContent = orig; btn.classList.remove('text-hyper-teal','border-hyper-teal'); }, 1500);
+            });
+        });
+
+        updateAdvSummary();
+    </script>
+</body>
+</html>
