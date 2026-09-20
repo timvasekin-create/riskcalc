@@ -92,8 +92,12 @@ async def robots():
     return HTMLResponse(content="User-agent: *\nAllow: /\nSitemap: /sitemap.xml", media_type="text/plain")
 
 @app.get("/sitemap.xml")
-async def sitemap():
+async def sitemap(request: Request):
+    base = str(request.base_url).rstrip("/")
     paths = ["/", "/bitcoin-risk-calculator", "/bybit-calculator", "/hyperliquid-calculator"]
-    urls = "".join(f"<url><loc>{p}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>" for p in paths)
+    urls = "".join(
+        f"<url><loc>{base}{p}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>"
+        for p in paths
+    )
     xml = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'
     return HTMLResponse(content=xml, media_type="application/xml")
