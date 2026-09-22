@@ -67,7 +67,7 @@ try:
     log("SITEMAP OK: все новые страницы на месте")
 
     _, html = get("/")
-    for must in ["tickerItems", "Rust<span", "api/prices"]:
+    for must in ["tickerItems", "Rust<span", "api/prices", "applyLivePrices", "entryTouchedByUser", "asset-price"]:
         assert must in html, f"HTML не содержит {must}"
     for gone in ['data-mode="cross"', 'id="saveBtn"', 'availDisplay', ">Limit<", "Cross<"]:
         assert gone not in html, f"HTML всё ещё содержит {gone}"

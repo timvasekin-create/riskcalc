@@ -160,10 +160,10 @@ async def api_prices():
         return PRICE_CACHE["data"]
 
     result = []
-    # Binance: BTC, ETH, SOL, BNB — цена и 24h% одним запросом
+    # Binance: все монеты списка, кроме HYPE — цена и 24h% одним запросом
     try:
         data = _fetch_json(
-            "https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22%5D",
+            "https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22,%22XRPUSDT%22,%22DOGEUSDT%22,%22LINKUSDT%22,%22AVAXUSDT%22,%22ARBUSDT%22,%22SUIUSDT%22,%22TIAUSDT%22%5D",
             timeout=4.0,
         )
         for t in data:
@@ -179,10 +179,15 @@ async def api_prices():
     if not result:
         try:
             cg = _fetch_json(
-                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin&vs_currencies=usd&include_24hr_change=true",
+                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin,ripple,dogecoin,chainlink,avalanche-2,arbitrum,sui,celestia&vs_currencies=usd&include_24hr_change=true",
                 timeout=5.0,
             )
-            cg_map = [("bitcoin", "BTC"), ("ethereum", "ETH"), ("solana", "SOL"), ("binancecoin", "BNB")]
+            cg_map = [
+                ("bitcoin", "BTC"), ("ethereum", "ETH"), ("solana", "SOL"),
+                ("binancecoin", "BNB"), ("ripple", "XRP"), ("dogecoin", "DOGE"),
+                ("chainlink", "LINK"), ("avalanche-2", "AVAX"), ("arbitrum", "ARB"),
+                ("sui", "SUI"), ("celestia", "TIA"),
+            ]
             for cg_id, sym in cg_map:
                 if cg_id in cg and cg[cg_id].get("usd"):
                     change = cg[cg_id].get("usd_24h_change")
@@ -230,8 +235,9 @@ async def api_prices():
     except Exception:
         pass
 
-    # Порядок как в тикере: BTC, ETH, SOL, HYPE, BNB
-    order = {"BTC": 0, "ETH": 1, "SOL": 2, "HYPE": 3, "BNB": 4}
+    # Порядок: сначала топ-5 для тикера, потом остальные активы по списку
+    order = {"BTC": 0, "ETH": 1, "SOL": 2, "HYPE": 3, "BNB": 4,
+             "XRP": 5, "DOGE": 6, "LINK": 7, "AVAX": 8, "ARB": 9, "SUI": 10, "TIA": 11}
     result.sort(key=lambda x: order.get(x["symbol"], 99))
 
     data_out = {"updated": int(now), "prices": result}

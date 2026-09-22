@@ -80,6 +80,9 @@
         .asset-btn:hover { border-color:#2a323d; color:#eaecef; }
         .asset-btn.active { background:rgba(80,210,193,0.08); border-color:#50d2c1; color:#50d2c1; }
         .asset-dot { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.7; }
+        .asset-price { font-size:10px; color:#5c6670; font-weight:500; font-family:'Inter',monospace; }
+        .asset-btn.active .asset-price { color:#3ba899; }
+        .asset-change { font-size:9px; font-weight:600; font-family:'Inter',monospace; }
         .rr-bar { display:flex; height:8px; border-radius:4px; overflow:hidden; background:#0a0e13; border:1px solid #1e252e; }
         .rr-bar-risk { background:linear-gradient(to right,#c73a4c,#f6465d); transition:width 0.4s ease; }
         .rr-bar-reward { background:linear-gradient(to right,#50d2c1,#3ba899); transition:width 0.4s ease; }
@@ -609,7 +612,8 @@
             btn.className = 'asset-btn' + (a.symbol === 'BTC' ? ' active' : '');
             btn.dataset.symbol = a.symbol;
             btn.dataset.price = a.price !== null ? a.price : '';
-            btn.innerHTML = `<span class="asset-dot"></span><span>${a.symbol}</span>`;
+            btn.innerHTML = `<span class="asset-dot"></span><span>${a.symbol}</span>`
+                + (a.price !== null ? `<span class="asset-price">${formatTickerPrice(a.price)}</span><span class="asset-change"></span>` : '');
             btn.title = a.name + (a.price ? ' · ~$' + a.price : '');
             assetScroll.appendChild(btn);
         });
@@ -620,6 +624,7 @@
             document.querySelectorAll('.asset-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             currentAsset = btn.dataset.symbol;
+            entryTouchedByUser = false; // выбрал актив заново — снова доверяем живой цене
             const price = btn.dataset.price;
             if (price) {
                 document.getElementById('entryPrice').value = parseFloat(price);
@@ -631,6 +636,40 @@
                 document.getElementById('entryPrice').focus();
             }
         });
+
+        // ===== Привязка Entry Price к живой цене =====
+        // Пока пользователь не правил поле Entry Price вручную — оно автоматически
+        // обновляется актуальной ценой выбранного актива (как на бирже).
+        let entryTouchedByUser = false;
+        const entryPriceInput = document.getElementById('entryPrice');
+        entryPriceInput.addEventListener('input', () => { entryTouchedByUser = true; });
+
+        function applyLivePrices(priceObj) {
+            // priceObj: { SYMBOL: { price: число, change24h: число|null } }
+            document.querySelectorAll('.asset-btn').forEach(btn => {
+                const sym = btn.dataset.symbol;
+                const p = priceObj[sym];
+                if (!p || !p.price) return;
+                btn.dataset.price = p.price;
+                btn.title = sym + ' · live $' + p.price;
+                const priceEl = btn.querySelector('.asset-price');
+                if (priceEl) priceEl.textContent = formatTickerPrice(p.price);
+                const chEl = btn.querySelector('.asset-change');
+                if (chEl) {
+                    if (p.change24h === null || p.change24h === undefined || isNaN(p.change24h)) {
+                        chEl.textContent = '';
+                    } else {
+                        chEl.textContent = (p.change24h >= 0 ? '+' : '') + p.change24h.toFixed(1) + '%';
+                        chEl.className = 'asset-change ' + (p.change24h >= 0 ? 'text-hyper-teal' : 'text-hyper-red');
+                    }
+                }
+                // Автообновление Entry Price выбранного актива
+                if (sym === currentAsset && !entryTouchedByUser) {
+                    entryPriceInput.value = parseFloat(p.price);
+                    autoCompute();
+                }
+            });
+        }
 
         // ===== Слайдер =====
         const slider = document.getElementById('leverage');
@@ -815,7 +854,10 @@
             if (!s) return;
             if (s.ownMargin) ownMarginInput.value = s.ownMargin;
             if (s.riskValue) document.getElementById('riskValue').value = s.riskValue;
-            if (s.entryPrice) document.getElementById('entryPrice').value = s.entryPrice;
+            if (s.entryPrice) {
+                document.getElementById('entryPrice').value = s.entryPrice;
+                entryTouchedByUser = true; // сохранённая цена юзера — живая не перезаписывает её
+            }
             if (s.stopLoss) document.getElementById('stopLoss').value = s.stopLoss;
             if (s.takeProfit) document.getElementById('takeProfit').value = s.takeProfit;
             if (s.leverage) slider.value = s.leverage;
@@ -910,7 +952,7 @@
                     }
                 }
             } catch(e) { /* нет 24h% — показываем только цену */ }
-            return { priceStr: formatTickerPrice(mid), change };
+            return { price: mid, priceStr: formatTickerPrice(mid), change };
         }
 
         async function loadTicker() {
@@ -924,18 +966,28 @@
                 if (r.ok) {
                     const j = await r.json();
                     if (j.prices && j.prices.length > 0) {
-                        renderTicker(j.prices.map(p => tickerItem(p.symbol, formatTickerPrice(p.price), p.change24h)));
+                        // Обновляем живые цены на кнопках активов и в Entry Price
+                        const liveObj = {};
+                        j.prices.forEach(p => { liveObj[p.symbol] = { price: p.price, change24h: p.change24h }; });
+                        applyLivePrices(liveObj);
+                        // Тикер: первые 5 монет (BTC, ETH, SOL, HYPE, BNB)
+                        renderTicker(j.prices.slice(0, 5).map(p => tickerItem(p.symbol, formatTickerPrice(p.price), p.change24h)));
                         return;
                     }
                 }
             } catch(e) { /* бэкенд недоступен — пробуем прямые запросы */ }
             // 2) Fallback: прямые запросы к Binance и Hyperliquid из браузера
-            // Binance: BTC, ETH, SOL, BNB — цена и 24h% одним запросом
-            const binanceTask = fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22%5D')
+            // Binance: все монеты, кроме HYPE — цена и 24h% одним запросом
+            const binanceTask = fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22,%22XRPUSDT%22,%22DOGEUSDT%22,%22LINKUSDT%22,%22AVAXUSDT%22,%22ARBUSDT%22,%22SUIUSDT%22,%22TIAUSDT%22%5D')
                 .then(r => { if (!r.ok) throw new Error('binance failed'); return r.json(); })
                 .catch(() => null);
             const hypeTask = fetchHype().catch(() => null);
             const [bin, hype] = await Promise.all([binanceTask, hypeTask]);
+            // Обновляем кнопки активов живыми ценами
+            const liveObj = {};
+            if (bin) bin.forEach(t => { liveObj[t.symbol.replace('USDT','')] = { price: parseFloat(t.lastPrice), change24h: parseFloat(t.priceChangePercent) }; });
+            if (hype) liveObj['HYPE'] = { price: hype.price, change24h: hype.change };
+            applyLivePrices(liveObj);
             const items = [];
             for (const s of TICKER_COINS) {
                 if (s === 'HYPE') {
