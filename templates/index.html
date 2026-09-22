@@ -6,10 +6,10 @@
     <meta name="google-site-verification" content="n2mYV47RGBhMT7VhaglMsE5A3_tVKpSUrVhGqzaIrkE">
 
     <!-- ===== SEO: значения по умолчанию, JS перезапишет под конкретный URL ===== -->
-    <title>Free Crypto Risk & Position Size Calculator — Bitcoin, Bybit, Hyperliquid</title>
+    <title>RustDeck — Free Crypto Risk & Position Size Calculator</title>
     <meta name="description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures. Free tool for Bybit, Hyperliquid, and Binance traders.">
     <meta name="keywords" content="crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator">
-    <link rel="canonical" href="https://riskcalc.app/">
+    <link rel="canonical" href="https://calc.rustdeck.app/">
 
     <meta property="og:title" content="Free Crypto Risk & Position Size Calculator">
     <meta property="og:description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures.">
@@ -110,16 +110,21 @@
         <a href="https://app.hyperliquid.xyz/join/BENGALCAT4" target="_blank" rel="noopener" class="text-hyper-teal hover:text-white font-semibold transition-colors ml-2 underline decoration-dotted underline-offset-2">Claim →</a>
     </div>
 
-    <!-- Хедер -->
+    <!-- Хедер RustDeck -->
     <header class="border-b border-hyper-border bg-hyper-bg py-4 px-4 md:px-6 flex justify-between items-center">
         <div class="flex items-center space-x-2">
             <svg class="w-6 h-6 text-hyper-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
             </svg>
-            <h1 class="text-lg font-bold tracking-tight text-white">Risk<span class="text-hyper-teal">Calc</span></h1>
+            <h1 class="text-lg font-bold tracking-tight text-white">Rust<span class="text-hyper-teal">Deck</span></h1>
         </div>
-        <div class="text-[10px] text-hyper-muted font-mono tracking-[0.2em]">PRO TRADING TOOL</div>
+        <div class="text-[10px] text-hyper-muted font-mono tracking-[0.2em]">PRO TRADING TOOLS</div>
     </header>
+
+    <!-- Живой тикер: топ-5 монет, цены обновляются автоматически -->
+    <div id="tickerBar" class="border-b border-hyper-border bg-hyper-panel/60 px-4 py-2 overflow-x-auto">
+        <div class="flex gap-6 min-w-max text-[12px] font-mono" id="tickerItems"></div>
+    </div>
 
     <main class="flex-grow container mx-auto px-4 py-6 md:py-10 max-w-7xl">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -142,20 +147,9 @@
                         <div class="asset-scroll" id="assetScroll"></div>
                     </div>
 
-                    <div class="p-4 border-b border-hyper-border">
-                        <div class="seg-group">
-                            <button type="button" class="seg-btn active" data-mode="cross">Cross</button>
-                            <button type="button" class="seg-btn" data-mode="leverage">Isolated</button>
-                            <button type="button" class="seg-btn" data-mode="unified">Unified</button>
-                        </div>
-                    </div>
-
-                    <div class="px-4 pt-3 border-b border-hyper-border flex gap-2">
-                        <button type="button" class="tab-btn active">Market</button>
-                        <button type="button" class="tab-btn">Limit</button>
-                        <button type="button" class="tab-btn">Pro</button>
-                        <div class="flex-1"></div>
-                        <div class="py-2 text-[11px] text-hyper-muted font-mono">Fees 0.045% / 0.015%</div>
+                    <div class="px-4 pt-3 border-b border-hyper-border flex items-center justify-between">
+                        <span class="text-[11px] text-hyper-muted uppercase tracking-[0.15em] font-semibold">Order</span>
+                        <span class="text-[11px] text-hyper-muted font-mono">Taker fee 0.045%</span>
                     </div>
 
                     <div class="p-4">
@@ -165,10 +159,6 @@
                         </div>
                     </div>
 
-                    <div class="px-4 pb-2 flex justify-between text-[13px]">
-                        <span class="text-hyper-muted2">Available to Trade</span>
-                        <span class="text-hyper-text font-mono" id="availDisplay">1,000.00 USDC</span>
-                    </div>
                     <div class="px-4 pb-4 flex justify-between text-[13px] border-b border-hyper-border">
                         <span class="text-hyper-muted2">Own Margin</span>
                         <span class="text-hyper-text font-mono" id="marginDisplay">1,000.00 USDC</span>
@@ -299,7 +289,6 @@
                                     </label>
                                 </div>
                                 <div class="flex gap-2 pt-2 border-t border-hyper-border">
-                                    <button type="button" id="saveBtn" class="flex-1 text-[11px] py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider font-semibold">Save State</button>
                                     <button type="button" id="resetBtn" class="flex-1 text-[11px] py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-red hover:border-hyper-red transition-colors uppercase tracking-wider font-semibold">Reset All</button>
                                 </div>
                             </div>
@@ -489,10 +478,14 @@
         <div class="flex flex-wrap justify-center gap-4 mb-2">
             <a href="/" class="hover:text-hyper-teal transition-colors">Home</a>
             <a href="/bitcoin-risk-calculator" class="hover:text-hyper-teal transition-colors">Bitcoin</a>
+            <a href="/ethereum-risk-calculator" class="hover:text-hyper-teal transition-colors">Ethereum</a>
+            <a href="/solana-risk-calculator" class="hover:text-hyper-teal transition-colors">Solana</a>
             <a href="/bybit-calculator" class="hover:text-hyper-teal transition-colors">Bybit</a>
             <a href="/hyperliquid-calculator" class="hover:text-hyper-teal transition-colors">Hyperliquid</a>
+            <a href="/leverage-calculator" class="hover:text-hyper-teal transition-colors">Leverage</a>
+            <a href="/liquidation-calculator" class="hover:text-hyper-teal transition-colors">Liquidation</a>
         </div>
-        <p>&copy; 2026 RiskCalc — Free tool for crypto traders. Not financial advice.</p>
+        <p>&copy; 2026 <span class="text-hyper-text font-semibold">RustDeck</span> — Free tools for crypto traders. Not financial advice.</p>
     </footer>
 
     <!-- ===== QR MODAL ===== -->
@@ -530,9 +523,9 @@
         // ===== SEO OVERRIDE по URL =====
         const SEO = {
             '/': {
-                title: 'Free Crypto Risk & Position Size Calculator — Bitcoin, Bybit, Hyperliquid',
+                title: 'RustDeck — Free Crypto Risk & Position Size Calculator',
                 desc: 'Calculate exact position size, margin, and risk for Bitcoin and crypto futures. Free tool for Bybit, Hyperliquid, and Binance traders.',
-                keywords: 'crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator'
+                keywords: 'crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator, rustdeck'
             },
             '/bitcoin-risk-calculator': {
                 title: 'Bitcoin Risk Calculator — Calculate BTC Position Size & Stop Loss',
@@ -548,6 +541,26 @@
                 title: 'Hyperliquid Risk & Position Size Calculator — Free Tool',
                 desc: 'Free Hyperliquid calculator. Calculate position size and required margin based on your risk tolerance for HYPE and other perpetual futures.',
                 keywords: 'hyperliquid calculator, hyperliquid position size, hype risk calculator, hyperliquid leverage calculator'
+            },
+            '/ethereum-risk-calculator': {
+                title: 'Ethereum Risk Calculator — ETH Position Size & Leverage Tool',
+                desc: 'Free Ethereum risk calculator. Plan ETH trades: position size, margin, stop loss and liquidation price based on the risk you accept per trade.',
+                keywords: 'ethereum risk calculator, eth position size calculator, ethereum leverage calculator, eth stop loss calculator'
+            },
+            '/solana-risk-calculator': {
+                title: 'Solana Risk Calculator — SOL Position Size & Stop Loss Tool',
+                desc: 'Free Solana risk calculator for futures traders. Calculate SOL position size, required margin and liquidation before you open a trade.',
+                keywords: 'solana risk calculator, sol position size calculator, solana leverage calculator, sol stop loss calculator'
+            },
+            '/leverage-calculator': {
+                title: 'Crypto Leverage Calculator — Safe Leverage & Liquidation',
+                desc: 'Free crypto leverage calculator. See how leverage affects liquidation price and stop distance so you never get liquidated by noise.',
+                keywords: 'crypto leverage calculator, leverage risk calculator, liquidation leverage calculator, safe leverage crypto'
+            },
+            '/liquidation-calculator': {
+                title: 'Liquidation Price Calculator — Crypto Futures Leverage',
+                desc: 'Free liquidation price calculator for crypto futures. Estimate isolated-margin liquidation for long and short positions on any leverage.',
+                keywords: 'liquidation price calculator, crypto liquidation calculator, futures liquidation calculator, hyperliquid liquidation'
             }
         };
 
@@ -686,20 +699,13 @@
             autoCompute();
         });
 
-        // ===== Top pills =====
-        document.querySelectorAll('.seg-group .seg-btn[data-mode]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.seg-group .seg-btn[data-mode]').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            });
-        });
+        // ===== Top pills — удалены (Cross/Isolated/Unified были декоративными) =====
 
         // ===== Own Margin =====
         const ownMarginInput = document.getElementById('ownMargin');
         function updateMarginDisplays() {
             const v = parseFloat(ownMarginInput.value) || 0;
             const fmt = v.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-            document.getElementById('availDisplay').textContent = fmt + ' USDC';
             document.getElementById('marginDisplay').textContent = fmt + ' USDC';
         }
         ownMarginInput.addEventListener('input', () => { updateMarginDisplays(); autoCompute(); });
@@ -847,14 +853,105 @@
             updateMarginDisplays();
         }
 
-        document.getElementById('saveBtn').addEventListener('click', () => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(getFormState()));
-            const btn = document.getElementById('saveBtn');
-            const orig = btn.textContent;
-            btn.textContent = '✓ Saved';
-            btn.classList.add('text-hyper-teal','border-hyper-teal');
-            setTimeout(() => { btn.textContent = orig; btn.classList.remove('text-hyper-teal','border-hyper-teal'); }, 1200);
-        });
+        // ===== ЖИВОЙ ТИКЕР (топ-5 монет) =====
+        // Источники (бесплатные, без ключей): Binance API + Hyperliquid API
+        const TICKER_COINS = ['BTC', 'ETH', 'SOL', 'HYPE', 'BNB'];
+        const tickerEl = document.getElementById('tickerItems');
+        let tickerFirstLoad = true;
+
+        function formatTickerPrice(p) {
+            if (p >= 1000) return p.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+            if (p >= 1) return p.toFixed(3);
+            return p.toFixed(4);
+        }
+
+        function tickerItem(symbol, priceStr, change) {
+            let chHtml = '<span class="text-hyper-muted">—</span>';
+            if (change !== null && !isNaN(change)) {
+                const color = change >= 0 ? 'text-hyper-teal' : 'text-hyper-red';
+                const sign = change >= 0 ? '+' : '';
+                chHtml = `<span class="${color}">${sign}${change.toFixed(2)}%</span>`;
+            }
+            return `<span class="flex items-center gap-2">
+                <span class="text-hyper-muted2 font-semibold">${symbol}</span>
+                <span class="text-hyper-text">${priceStr}</span>
+                ${chHtml}
+                <span class="text-hyper-muted text-[10px]">24h</span>
+            </span>`;
+        }
+
+        function renderTicker(items) {
+            tickerEl.innerHTML = items.join('');
+        }
+
+        // HYPE торгуется только на Hyperliquid: mid-цена + 24h% из дневной свечи
+        async function fetchHype() {
+            const midRes = await fetch('https://api-ui.hyperliquid.xyz/info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'allMids' })
+            });
+            if (!midRes.ok) throw new Error('hyperliquid mids failed');
+            const mids = await midRes.json();
+            const mid = parseFloat(mids['@107']); // @107 = HYPE
+            if (!mid || mid <= 0) throw new Error('HYPE mid not found');
+            let change = null;
+            try {
+                const cRes = await fetch('https://api-ui.hyperliquid.xyz/info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'candleSnapshot', req: { coin: '@107', interval: '1d', startTime: Date.now() - 24*60*60*1000, endTime: Date.now() } })
+                });
+                if (cRes.ok) {
+                    const candles = await cRes.json();
+                    if (Array.isArray(candles) && candles.length > 0) {
+                        const open = parseFloat(candles[0].o);
+                        if (open > 0) change = (mid - open) / open * 100;
+                    }
+                }
+            } catch(e) { /* нет 24h% — показываем только цену */ }
+            return { priceStr: formatTickerPrice(mid), change };
+        }
+
+        async function loadTicker() {
+            if (tickerFirstLoad) {
+                renderTicker(TICKER_COINS.map(s => tickerItem(s, '…', null)));
+                tickerFirstLoad = false;
+            }
+            // 1) Свой бэкенд /api/prices — быстро, без CORS-проблем, кэш 30 сек
+            try {
+                const r = await fetch('/api/prices');
+                if (r.ok) {
+                    const j = await r.json();
+                    if (j.prices && j.prices.length > 0) {
+                        renderTicker(j.prices.map(p => tickerItem(p.symbol, formatTickerPrice(p.price), p.change24h)));
+                        return;
+                    }
+                }
+            } catch(e) { /* бэкенд недоступен — пробуем прямые запросы */ }
+            // 2) Fallback: прямые запросы к Binance и Hyperliquid из браузера
+            // Binance: BTC, ETH, SOL, BNB — цена и 24h% одним запросом
+            const binanceTask = fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22%5D')
+                .then(r => { if (!r.ok) throw new Error('binance failed'); return r.json(); })
+                .catch(() => null);
+            const hypeTask = fetchHype().catch(() => null);
+            const [bin, hype] = await Promise.all([binanceTask, hypeTask]);
+            const items = [];
+            for (const s of TICKER_COINS) {
+                if (s === 'HYPE') {
+                    items.push(tickerItem('HYPE', hype ? hype.priceStr : '—', hype ? hype.change : null));
+                } else if (bin) {
+                    const t = bin.find(x => x.symbol === s + 'USDT');
+                    items.push(tickerItem(s, t ? formatTickerPrice(parseFloat(t.lastPrice)) : '—', t ? parseFloat(t.priceChangePercent) : null));
+                } else {
+                    items.push(tickerItem(s, '—', null));
+                }
+            }
+            renderTicker(items);
+        }
+
+        loadTicker();
+        setInterval(loadTicker, 30000);
 
         document.getElementById('resetBtn').addEventListener('click', () => {
             if (!confirm('Reset all inputs to defaults?')) return;
@@ -1090,7 +1187,7 @@
             if (!r) return;
             const dir = r.direction.toUpperCase();
             const txt =
-`⚡ RiskCalc — Trade Plan
+`⚡ RustDeck — Trade Plan
 Direction: ${dir}
 Entry: ${r.entry}
 Stop Loss: ${r.sl}

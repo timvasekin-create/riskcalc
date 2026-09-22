@@ -7,3 +7,10 @@ env/
 .idea/
 *.log
 .DS_Store
+
+# Временные файлы локальных тестов
+smoke_out.txt
+uv_out.txt
+uv_err.txt
+py_test.txt
+env_out.txt
