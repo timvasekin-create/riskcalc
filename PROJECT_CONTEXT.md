@@ -59,9 +59,19 @@ riskcalc/
     биржа называется "HlPerp", fundingRate за fundingIntervalHours!
   * Telegram CTA + roadmap-плитки. Калькулятор с главной УБРАН (не мейн-функция,
     живёт тихо на calc.rustdeck.app)
+  * LIVE ALERTS (браузер): тумблер запрашивает разрешение на Notifications, звук через
+    WebAudio (низкий тон = убыток/ликвидация), тумблеры событий (open/close/liquidation/
+    any fill/sound), лента событий. Опрос /api/wallet каждые 25с, diff состояний.
+    Настройки в localStorage профиля.
+  * ЛОКАЛЬНЫЙ ПРОФИЛЬ: Sign in в шапке (имя + сохранённые кошельки + lastWallet,
+    всё в localStorage rustdeck_profile_v1, БЕЗ серверной авторизации). Чипы
+    сохранённых кошельков над формой (клик = отследить, ✕ = удалить), кнопка ＋ Save wallet.
+  * OPEN ORDERS: таблица лимиток/TP/SL (frontendOpenOrders) в результатах трекера.
+  * EXPORT CSV: кнопка у Recent Trades → /api/fills/{address}?limit=500 → скачивание.
 - Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
   calc.rustdeck.app/localhost → калькулятор
-- smoke_test.py — все роуты, host-роутинг, /api/wallet, /api/funding
+- smoke_test.py — все роуты, host-роутинг, /api/wallet, /api/funding, /api/markets,
+  /api/fills, логика одного-триала
 
 ## TELEGRAM-БОТ (сделано)
 - @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,

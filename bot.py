@@ -181,22 +181,41 @@ def _try_link(chat_id, username, code):
     conn.execute(
         "UPDATE links SET status='linked', chat_id=? WHERE code=?", (chat_id, code)
     )
-    conn.execute(
-        """INSERT INTO subscribers (chat_id, username, tier, expires_at, linked_at)
-           VALUES (?, ?, 'trial', ?, ?)
-           ON CONFLICT(chat_id) DO UPDATE SET username=excluded.username""",
-        (chat_id, username, expires, time.time()),
-    )
+    # ОДИН триал на аккаунт: повторная привязка НЕ продлевает подписку.
+    existing = conn.execute(
+        "SELECT * FROM subscribers WHERE chat_id=?", (chat_id,)
+    ).fetchone()
+    if existing is None:
+        conn.execute(
+            """INSERT INTO subscribers (chat_id, username, tier, expires_at, linked_at)
+               VALUES (?, ?, 'trial', ?, ?)""",
+            (chat_id, username, expires, time.time()),
+        )
+        until = time.strftime("%b %d, %Y", time.gmtime(expires))
+        message = (
+            f"✅ *Telegram linked to RustDeck!*\n\n"
+            f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
+            f"Trade alerts, SL/TP notifications and daily summaries are coming soon.\n"
+            f"Commands: /status — subscription, /prices — live prices, /help — all commands."
+        )
+    else:
+        left_days = (existing["expires_at"] - time.time()) / 86400 if existing["expires_at"] else 0
+        if left_days > 0:
+            until = time.strftime("%b %d, %Y", time.gmtime(existing["expires_at"]))
+            message = (
+                f"ℹ️ This Telegram account is already linked.\n\n"
+                f"Your plan: *{existing['tier']}* (until {until}).\n"
+                f"Linking again does *not* extend the free trial."
+            )
+        else:
+            message = (
+                f"ℹ️ This Telegram account is already linked.\n\n"
+                f"Your free trial has already been used and has ended.\n"
+                f"Paid plans are coming soon — for now everything stays free 🎁"
+            )
     conn.commit()
     conn.close()
-    until = time.strftime("%b %d, %Y", time.gmtime(expires))
-    send_message(
-        chat_id,
-        f"✅ *Telegram linked to RustDeck!*\n\n"
-        f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
-        f"Trade alerts, SL/TP notifications and daily summaries are coming soon.\n"
-        f"Commands: /status — subscription, /prices — live prices, /help — all commands.",
-    )
+    send_message(chat_id, message)
 
 
 def _get_json(url, timeout=8):
@@ -224,6 +243,7 @@ def _cmd_prices(chat_id):
     except Exception:
         pass
 
+    mid = None
     try:
         req = urllib.request.Request(
             "https://api-ui.hyperliquid.xyz/info",
@@ -233,10 +253,33 @@ def _cmd_prices(chat_id):
         with urllib.request.urlopen(req, timeout=8) as resp:
             mids = json.loads(resp.read().decode("utf-8"))
         mid = float(mids.get("@107") or 0)
-        if mid > 0:
-            prices["HYPE"] = {"price": mid, "change": None}
     except Exception:
-        pass
+        mid = None
+
+    if mid and mid > 0:
+        try:
+            # Точное 24ч изменение HYPE: берём часовую свечу 24 часа назад
+            # (дневная свеча даёт открытие СЕГОДНЯшнего дня — процент врёт)
+            req = urllib.request.Request(
+                "https://api-ui.hyperliquid.xyz/info",
+                data=json.dumps({
+                    "type": "candleSnapshot",
+                    "req": {
+                        "coin": "@107",
+                        "interval": "1h",
+                        "startTime": int((time.time() - 25 * 3600) * 1000),
+                        "endTime": int(time.time() * 1000),
+                    },
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                candles = json.loads(resp.read().decode("utf-8"))
+            open_24h = float(candles[0]["o"]) if isinstance(candles, list) and candles else 0
+            change = (mid - open_24h) / open_24h * 100 if open_24h > 0 else None
+            prices["HYPE"] = {"price": mid, "change": change}
+        except Exception:
+            prices["HYPE"] = {"price": mid, "change": None}
 
     if not prices:
         send_message(chat_id, "⚠️ Price feed is temporarily unavailable. Try again in a minute.")

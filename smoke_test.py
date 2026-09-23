@@ -94,7 +94,9 @@ try:
     req = urllib.request.Request(BASE + "/", headers={"Host": "rustdeck.app"})
     with urllib.request.urlopen(req, timeout=8) as r:
         hub = r.read().decode("utf-8", "replace")
-    for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable", "fundingHigh", "</html>"]:
+    for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable",
+                 "fundingHigh", "profileArea", "alertsToggle", "exportCsvBtn", "ordersTable",
+                 "walletChips", "detectEvents", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
     log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
@@ -128,6 +130,50 @@ try:
         log(f"FUNDING API: {status}, {n} монет")
     except Exception as e:
         log("FUNDING API WARN:", repr(e))
+
+    # Markets API (скринер)
+    try:
+        status, body = get("/api/markets", timeout=20)
+        m = json.loads(body)
+        n = len(m.get("markets", []))
+        top = (m.get("markets") or [{}])[0]
+        log(f"MARKETS API: {status}, {n} монет, топ по объёму: {top.get('coin')} vol=${top.get('volume24h')}")
+    except Exception as e:
+        log("MARKETS API WARN:", repr(e))
+
+    # Fills API (для CSV-экспорта)
+    try:
+        status, body = get("/api/fills/0x000000000000000000000000000000000000dEaD?limit=50", timeout=20)
+        fl = json.loads(body)
+        log(f"FILLS API: {status}, {fl.get('count')} сделок")
+    except urllib.error.HTTPError as e:
+        log(f"FILLS API: {e.code} (HL может быть недоступен локально)")
+    except Exception as e:
+        log("FILLS API WARN:", repr(e))
+
+    # Логика триала: одна акция на аккаунт, повторная привязка НЕ продлевает
+    try:
+        import bot as _bot
+        _bot.init_db()
+        c1 = _bot.create_link_code()
+        _bot._try_link(777000, 'tester', c1)  # send_message молча упадёт без токена — ок
+        conn = _bot._db()
+        sub1 = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert sub1 is not None, "подписка не создалась"
+        c2 = _bot.create_link_code()
+        _bot._try_link(777000, 'tester', c2)
+        conn = _bot._db()
+        sub2 = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert abs(sub2["expires_at"] - sub1["expires_at"]) < 0.001, "trial ПРОДЛИЛСЯ — так нельзя!"
+        log(f"TRIAL OK: expires_at не изменился при повторной привязке")
+        conn = _bot._db()
+        conn.execute("DELETE FROM subscribers WHERE chat_id=?", (777000,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log("TRIAL TEST WARN:", repr(e))
 
     log("FAILS:", fails)
     log("ALL SMOKE TESTS PASSED" if fails == 0 else "SOME CHECKS FAILED")

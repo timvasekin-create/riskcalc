@@ -223,14 +223,16 @@ async def api_prices():
         if hype_mid > 0:
             change = None
             try:
+                # Точное 24ч изменение: часовая свеча 24 часа назад
+                # (дневная даёт открытие сегодняшнего дня — процент врёт)
                 candles = _fetch_json(
                     "https://api-ui.hyperliquid.xyz/info",
                     payload={
                         "type": "candleSnapshot",
                         "req": {
                             "coin": "@107",
-                            "interval": "1d",
-                            "startTime": int((_time.time() - 24 * 60 * 60) * 1000),
+                            "interval": "1h",
+                            "startTime": int((_time.time() - 25 * 3600) * 1000),
                             "endTime": int(_time.time() * 1000),
                         },
                     },
@@ -265,6 +267,10 @@ import re as _re
 WALLET_CACHE: dict = {}
 WALLET_TTL = 30  # секунд
 
+def _pnl_since(closed_trades: list, since_ms: float) -> float:
+    """Суммарный реализованный PnL сделок, закрытых после since_ms."""
+    return round(sum(t["pnl"] for t in closed_trades if t["time"] >= since_ms), 2)
+
 def _hl_info(payload: dict, timeout: float = 10.0):
     """POST к Hyperliquid info API."""
     return _fetch_json(HL_INFO_URL, payload=payload, timeout=timeout)
@@ -286,6 +292,7 @@ async def api_wallet(address: str):
     try:
         state = _hl_info({"type": "clearinghouseState", "user": address})
         fills = _hl_info({"type": "userFills", "user": address})
+        orders = _hl_info({"type": "frontendOpenOrders", "user": address})
     except Exception:
         return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
 
@@ -341,6 +348,23 @@ async def api_wallet(address: str):
     best = max(closed, key=lambda t: t["pnl"], default=None)
     worst = min(closed, key=lambda t: t["pnl"], default=None)
 
+    # Открытые ордера (лимитки, TP/SL, стопы)
+    open_orders = []
+    for o in orders or []:
+        try:
+            open_orders.append({
+                "coin": o.get("coin"),
+                "side": o.get("side"),
+                "size": float(o.get("origSz") or o.get("sz") or 0),
+                "type": o.get("orderType") or ("Trigger" if o.get("isTrigger") else "Limit"),
+                "price": float(o.get("limitPx") or o.get("triggerPx") or 0),
+                "is_trigger": bool(o.get("isTrigger")),
+                "reduce_only": bool(o.get("reduceOnly")),
+                "time": o.get("timestamp"),
+            })
+        except (TypeError, ValueError):
+            continue
+
     # Последние сделки (все типы, не только закрытия)
     recent_raw = sorted(fills or [], key=lambda f: f.get("time") or 0, reverse=True)[:12]
     recent = []
@@ -363,6 +387,7 @@ async def api_wallet(address: str):
         "notional_position": round(ntl_pos, 2),
         "unrealized_pnl": round(unrealized, 2),
         "positions": positions,
+        "open_orders": open_orders,
         "stats": {
             "closed_trades": len(closed),
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
@@ -371,9 +396,96 @@ async def api_wallet(address: str):
             "worst_trade": {"coin": worst["coin"], "pnl": round(worst["pnl"], 2)} if worst else None,
         },
         "recent_trades": recent,
+        # Реализованный PnL по периодам (для тумблеров 24h/7d/30d/All)
+        "pnl_periods": {
+            "24h": _pnl_since(closed, now * 1000 - 24 * 3600 * 1000),
+            "7d": _pnl_since(closed, now * 1000 - 7 * 24 * 3600 * 1000),
+            "30d": _pnl_since(closed, now * 1000 - 30 * 24 * 3600 * 1000),
+            "all": round(realized, 2),
+        },
         "updated": int(now),
     }
     WALLET_CACHE[key] = {"data": data_out, "ts": now}
+    return data_out
+
+@app.get("/api/fills/{address}")
+async def api_fills(address: str, limit: int = 200):
+    """Все сделки кошелька для экспорта CSV (до 500 последних)."""
+    address = (address or "").strip()
+    if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        return JSONResponse({"error": "invalid_address"}, status_code=400)
+    limit = max(1, min(limit, 500))
+    try:
+        fills = _hl_info({"type": "userFills", "user": address})
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+
+    out = []
+    for f in sorted(fills or [], key=lambda x: x.get("time") or 0, reverse=True)[:limit]:
+        out.append({
+            "coin": f.get("coin"),
+            "dir": f.get("dir"),
+            "side": f.get("side"),
+            "px": float(f.get("px") or 0),
+            "sz": float(f.get("sz") or 0),
+            "closed_pnl": round(float(f.get("closedPnl") or 0), 2),
+            "fee": float(f.get("fee") or 0),
+            "time": f.get("time"),
+        })
+    return {"address": address, "count": len(out), "fills": out}
+
+# ===== API: Market Screener (Hyperliquid: цена, объём, OI, фандинг) =====
+MARKETS_CACHE: dict = {"data": None, "ts": 0.0}
+MARKETS_TTL = 30  # секунд
+
+@app.get("/api/markets")
+async def api_markets():
+    """Скринер перпетуалов Hyperliquid: цена, изменение 24ч, объём 24ч,
+    открытый интерес (USD) и ставка фандинга. Кэш 30 сек."""
+    now = _time.time()
+    if MARKETS_CACHE["data"] and now - MARKETS_CACHE["ts"] < MARKETS_TTL:
+        return MARKETS_CACHE["data"]
+
+    try:
+        data = _hl_info({"type": "metaAndAssetCtxs"})
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+
+    # Формат: [meta{universe:[{name,...}]}, ctxs[{markPx, prevDayPx, dayNtlVlm, openInterest, funding, ...}]]
+    try:
+        meta, ctxs = data[0], data[1]
+        universe = meta.get("universe") or []
+        out = []
+        for i, asset in enumerate(universe):
+            if i >= len(ctxs) or asset.get("isDelisted"):
+                continue
+            c = ctxs[i] or {}
+            try:
+                mark = float(c.get("markPx") or 0)
+                prev = float(c.get("prevDayPx") or 0)
+                oi_coins = float(c.get("openInterest") or 0)
+                funding = float(c.get("funding") or 0)
+                volume = float(c.get("dayNtlVlm") or 0)
+            except (TypeError, ValueError):
+                continue
+            if mark <= 0:
+                continue
+            change = (mark - prev) / prev * 100 if prev > 0 else 0
+            out.append({
+                "coin": asset.get("name"),
+                "price": mark,
+                "change24h": round(change, 2),
+                "volume24h": round(volume, 0),
+                "open_interest_usd": round(oi_coins * mark, 0),
+                "funding_1h": round(funding * 100, 4),
+            })
+        out.sort(key=lambda x: x["volume24h"], reverse=True)
+        data_out = {"updated": int(now), "markets": out[:60]}
+    except Exception:
+        return JSONResponse({"error": "parse_failed"}, status_code=502)
+
+    MARKETS_CACHE["data"] = data_out
+    MARKETS_CACHE["ts"] = now
     return data_out
 
 # ===== API: Funding Rates (Hyperliquid) =====

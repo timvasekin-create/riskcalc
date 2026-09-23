@@ -41,6 +41,15 @@
         .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:0.05em; }
         .pill-long { background:rgba(80,210,193,0.12); color:#50d2c1; }
         .pill-short { background:rgba(246,70,93,0.12); color:#f6465d; }
+        .pnlp-btn { font-size:9px; font-weight:700; padding:2px 6px; border-radius:4px; background:transparent; border:1px solid #1e252e; color:#5c6670; cursor:pointer; transition:all 0.15s; }
+        .pnlp-btn:hover { color:#eaecef; }
+        .pnlp-btn.active { background:rgba(80,210,193,0.12); border-color:#50d2c1; color:#50d2c1; }
+        .wallet-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; background:#0a0e13; border:1px solid #1e252e; color:#8b96a3; font-size:11px; font-family:monospace; cursor:pointer; transition:all 0.15s; }
+        .wallet-chip:hover { color:#eaecef; border-color:#2a323d; }
+        .wallet-chip.active { border-color:#50d2c1; color:#50d2c1; background:rgba(80,210,193,0.08); }
+        .wallet-chip .chip-x { opacity:0.4; cursor:pointer; padding-left:2px; }
+        .wallet-chip .chip-x:hover { opacity:1; color:#f6465d; }
+        .alert-feed-item { background:#0a0e13; border:1px solid #1e252e; border-radius:6px; padding:6px 10px; }
         section { scroll-margin-top:20px; }
     </style>
 </head>
@@ -60,7 +69,10 @@
             <a href="#funding" class="hover:text-hyper-teal transition-colors">Funding</a>
             <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="hover:text-hyper-teal transition-colors">Telegram</a>
         </nav>
-        <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="md:hidden text-[12px] font-semibold text-hyper-teal uppercase tracking-wider">Bot →</a>
+        <div class="flex items-center gap-3">
+            <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="md:hidden text-[12px] font-semibold text-hyper-teal uppercase tracking-wider">Bot →</a>
+            <div id="profileArea" class="flex items-center"></div>
+        </div>
     </header>
 
     <main class="flex-grow">
@@ -90,6 +102,37 @@
                     </button>
                 </div>
                 <div id="walletError" class="hidden mt-3 bg-hyper-red/10 border border-hyper-red/40 text-hyper-red text-xs p-3 rounded-md"></div>
+
+                <!-- Сохранённые кошельки профиля -->
+                <div id="walletChips" class="hidden flex flex-wrap gap-2 mt-3"></div>
+                <button type="button" id="saveWalletBtn" class="hidden mt-2 text-[10px] px-2.5 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono">＋ Save wallet</button>
+
+                <!-- Live Alerts: уведомления браузера + звук -->
+                <div class="mt-4 pt-4 border-t border-hyper-border">
+                    <div class="flex items-center justify-between flex-wrap gap-3">
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="alertsToggle" class="sr-only peer">
+                                <div class="w-9 h-5 bg-hyper-border rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-hyper-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-hyper-teal peer-checked:after:bg-hyper-bg"></div>
+                            </label>
+                            <div>
+                                <div class="text-[12px] font-semibold text-white">🔔 Live Alerts <span id="alertsPerm" class="hidden text-[9px] font-mono px-1.5 py-0.5 rounded bg-hyper-border text-hyper-muted2 ml-1"></span></div>
+                                <div class="text-[10px] text-hyper-muted">Browser notifications + sound for the tracked wallet</div>
+                            </div>
+                        </div>
+                        <button type="button" id="alertsGear" class="text-[11px] text-hyper-muted2 hover:text-hyper-teal transition-colors">⚙ Configure</button>
+                    </div>
+                    <div id="alertsSettings" class="hidden mt-3 bg-hyper-bg/60 border border-hyper-border rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evOpen" class="accent-[#50d2c1]"> Position opened</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evClose" class="accent-[#50d2c1]"> Position closed</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evLiq" class="accent-[#50d2c1]"> Liquidation</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evFill" class="accent-[#50d2c1]"> Any new fill</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evSound" class="accent-[#50d2c1]"> Sound</label>
+                        <button type="button" id="alertsTest" class="text-left text-hyper-teal hover:text-white transition-colors">▶ Test alert</button>
+                    </div>
+                    <div id="alertsFeed" class="hidden mt-3 space-y-1.5 max-h-40 overflow-y-auto text-[11px]"></div>
+                </div>
+
                 <p class="text-[11px] text-hyper-muted mt-3">Public on-chain data only. We never ask for keys, wallet access or sign-up.</p>
 
                 <!-- Результат -->
@@ -109,8 +152,17 @@
                             <div id="stTrades" class="text-[10px] text-hyper-muted mt-0.5">0 closed trades</div>
                         </div>
                         <div class="stat-card">
-                            <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Realized PnL</div>
-                            <div id="stRealized" class="text-xl font-bold font-mono">$0.00</div>
+                            <div class="flex items-center justify-between mb-1 gap-2">
+                                <div class="text-[10px] text-hyper-muted uppercase tracking-wider">Realized PnL</div>
+                                <div class="flex gap-0.5" id="pnlToggles">
+                                    <button type="button" data-period="24h" class="pnlp-btn active">24H</button>
+                                    <button type="button" data-period="7d" class="pnlp-btn">7D</button>
+                                    <button type="button" data-period="30d" class="pnlp-btn">30D</button>
+                                    <button type="button" data-period="all" class="pnlp-btn">All</button>
+                                </div>
+                            </div>
+                            <div id="stPnl" class="text-xl font-bold font-mono">$0.00</div>
+                            <div id="stBest" class="text-[10px] text-hyper-muted mt-0.5">Best trade: —</div>
                         </div>
                     </div>
 
@@ -125,8 +177,23 @@
                     </div>
                     <div id="noPositions" class="hidden text-[12px] text-hyper-muted mb-5">No open positions.</div>
 
+                    <!-- Открытые ордера: лимитки, TP/SL -->
+                    <div id="ordersBlock" class="mb-5">
+                        <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Open Orders <span class="normal-case tracking-normal">(limits, TP/SL)</span></div>
+                        <div class="overflow-x-auto border border-hyper-border rounded-lg">
+                            <table class="data-table" id="ordersTable">
+                                <thead><tr><th>Coin</th><th>Type</th><th>Side</th><th>Price</th><th>Size</th><th>Reduce Only</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="noOrders" class="hidden text-[12px] text-hyper-muted mb-5">No open orders.</div>
+
                     <div>
-                        <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Recent Trades <span class="normal-case tracking-normal">(last 12 fills)</span></div>
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold">Recent Trades <span class="normal-case tracking-normal">(last 12 fills)</span></div>
+                            <button type="button" id="exportCsvBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono">Export CSV</button>
+                        </div>
                         <div class="overflow-x-auto border border-hyper-border rounded-lg">
                             <table class="data-table" id="tradesTable">
                                 <thead><tr><th>Coin</th><th>Action</th><th>Price</th><th>Size</th><th>Closed PnL</th><th>Time</th></tr></thead>
@@ -145,13 +212,13 @@
         <section id="markets" class="max-w-5xl mx-auto px-4 pb-12">
             <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 md:p-6">
                 <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-bold text-white">Live Markets</h3>
+                    <h3 class="text-lg font-bold text-white">Live Markets <span class="text-hyper-muted2 text-[12px] font-normal">Hyperliquid perps</span></h3>
                     <span class="text-[10px] text-hyper-muted font-mono uppercase tracking-wider">Auto-refresh 30s</span>
                 </div>
-                <div class="overflow-x-auto border border-hyper-border rounded-lg">
+                <div class="overflow-x-auto border border-hyper-border rounded-lg max-h-[420px] overflow-y-auto">
                     <table class="data-table" id="marketsTable">
-                        <thead><tr><th>Coin</th><th>Price</th><th>24h Change</th><th>Trend</th></tr></thead>
-                        <tbody><tr><td colspan="4" class="text-center text-hyper-muted py-6">Loading…</td></tr></tbody>
+                        <thead><tr><th>Coin</th><th>Price</th><th>24h</th><th>24h Volume</th><th>Open Interest</th><th>Funding 1h</th></tr></thead>
+                        <tbody><tr><td colspan="6" class="text-center text-hyper-muted py-6">Loading…</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -220,8 +287,10 @@
     <script>
         // ===== Утилиты =====
         const $ = (id) => document.getElementById(id);
-        const fmtUsd = (n, d=2) => n.toLocaleString(undefined, {minimumFractionDigits:d, maximumFractionDigits:d});
-        const fmtPrice = (p) => p >= 1000 ? p.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : p >= 1 ? p.toFixed(3) : p.toFixed(4);
+        const LOCALE = 'en-US';
+        const fmtUsd = (n, d=2) => n.toLocaleString(LOCALE, {minimumFractionDigits:d, maximumFractionDigits:d});
+        const fmtPrice = (p) => p >= 1000 ? p.toLocaleString(LOCALE, {minimumFractionDigits:2, maximumFractionDigits:2}) : p >= 1 ? p.toFixed(3) : p.toFixed(4);
+        const fmtCompact = (n) => n >= 1e9 ? '$' + (n/1e9).toFixed(2) + 'B' : n >= 1e6 ? '$' + (n/1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(1) + 'K' : '$' + n.toFixed(0);
         const pnlCls = (v) => v >= 0 ? 'text-hyper-teal' : 'text-hyper-red';
         const pnlSign = (v) => (v >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(v));
         const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
@@ -294,6 +363,10 @@
                     return;
                 }
                 renderWallet(j);
+                currentWalletAddr = addr;
+                if (profile) { profile.lastWallet = addr; saveProfile(profile); }
+                renderChips();
+                if (getAlerts().enabled) startWatching();
             } catch(e) {
                 errBox.textContent = 'Network error. Try again.';
                 errBox.classList.remove('hidden');
@@ -305,15 +378,14 @@
     </script>
     <script>
         function renderWallet(d) {
+            window.__walletData = d;
             $('stAccount').textContent = '$' + fmtUsd(d.account_value);
             const up = $('stUnrealized');
             up.textContent = pnlSign(d.unrealized_pnl);
             up.className = 'text-xl font-bold font-mono ' + pnlCls(d.unrealized_pnl);
             $('stWinRate').textContent = d.stats.win_rate !== null ? d.stats.win_rate + '%' : '—';
             $('stTrades').textContent = d.stats.closed_trades + ' closed trades';
-            const rp = $('stRealized');
-            rp.textContent = pnlSign(d.stats.realized_pnl);
-            rp.className = 'text-xl font-bold font-mono ' + pnlCls(d.stats.realized_pnl);
+            setPnlPeriod(currentPeriod);
 
             const pBody = $('positionsTable').querySelector('tbody');
             pBody.innerHTML = (d.positions || []).map(p => `
@@ -330,9 +402,23 @@
             $('positionsBlock').classList.toggle('hidden', !(d.positions || []).length);
             $('noPositions').classList.toggle('hidden', !!(d.positions || []).length);
 
+            // Открытые ордера (лимитки, TP/SL)
+            const oBody = $('ordersTable').querySelector('tbody');
+            oBody.innerHTML = (d.open_orders || []).map(o => `
+                <tr>
+                    <td class="font-semibold">${esc(o.coin)}</td>
+                    <td class="text-hyper-muted2">${esc(o.type)}${o.is_trigger ? ' ⚡' : ''}</td>
+                    <td class="text-hyper-muted2">${esc(o.side)}</td>
+                    <td class="font-mono">${fmtPrice(o.price)}</td>
+                    <td class="font-mono">${o.size}</td>
+                    <td class="text-hyper-muted2">${o.reduce_only ? 'Yes' : '—'}</td>
+                </tr>`).join('');
+            $('ordersBlock').classList.toggle('hidden', !(d.open_orders || []).length);
+            $('noOrders').classList.toggle('hidden', !!(d.open_orders || []).length);
+
             const tBody = $('tradesTable').querySelector('tbody');
             tBody.innerHTML = (d.recent_trades || []).map(t => {
-                const dt = t.time ? new Date(t.time).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+                const dt = t.time ? new Date(t.time).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false}) : '—';
                 const showPnl = t.closed_pnl !== 0;
                 return `<tr>
                     <td class="font-semibold">${esc(t.coin)}</td>
@@ -345,29 +431,51 @@
             }).join('');
             $('noTrades').classList.toggle('hidden', !!(d.recent_trades || []).length);
 
-            $('walletUpdated').textContent = 'Data from Hyperliquid · updated ' + new Date(d.updated * 1000).toLocaleTimeString();
+            $('walletUpdated').textContent = 'Data from Hyperliquid · updated ' + new Date(d.updated * 1000).toLocaleTimeString('en-US');
             $('walletResult').classList.remove('hidden');
         }
+
+        // ===== Тумблер периода PnL (24h / 7d / 30d / All-time) =====
+        let currentPeriod = 'all';
+
+        function setPnlPeriod(period) {
+            currentPeriod = period;
+            const d = window.__walletData;
+            if (!d) return;
+            const el = $('stPnl');
+            const val = (d.pnl_periods || {})[period] ?? d.stats.realized_pnl;
+            el.textContent = pnlSign(val);
+            el.className = 'text-xl font-bold font-mono ' + pnlCls(val);
+            const best = d.stats.best_trade;
+            $('stBest').textContent = best ? `Best trade: ${pnlSign(best.pnl)} (${esc(best.coin)})` : 'Best trade: —';
+            document.querySelectorAll('#pnlToggles .pnlp-btn').forEach(b =>
+                b.classList.toggle('active', b.dataset.period === period));
+        }
+
+        document.querySelectorAll('#pnlToggles .pnlp-btn').forEach(b =>
+            b.addEventListener('click', () => setPnlPeriod(b.dataset.period)));
 
         $('trackBtn').addEventListener('click', trackWallet);
         $('walletAddress').addEventListener('keydown', e => { if (e.key === 'Enter') trackWallet(); });
     </script>
     <script>
-        // ===== LIVE MARKETS =====
+        // ===== LIVE MARKETS (скринер: цена, 24ч, объём, OI, фандинг) =====
         async function loadMarkets() {
             try {
-                const r = await fetch('/api/prices');
+                const r = await fetch('/api/markets');
                 const j = await r.json();
                 const body = $('marketsTable').querySelector('tbody');
-                body.innerHTML = (j.prices || []).map(p => {
+                body.innerHTML = (j.markets || []).map(p => {
                     const ch = p.change24h;
                     const cls = ch >= 0 ? 'text-hyper-teal' : 'text-hyper-red';
-                    const bar = `<div class="w-16 h-1 rounded bg-hyper-border overflow-hidden"><div class="h-full ${ch >= 0 ? 'bg-hyper-teal' : 'bg-hyper-red'}" style="width:${Math.min(100, Math.abs(ch) * 10)}%"></div></div>`;
+                    const fcls = p.funding_1h >= 0 ? 'text-hyper-teal' : 'text-hyper-red';
                     return `<tr>
-                        <td class="font-semibold">${esc(p.symbol)}</td>
+                        <td class="font-semibold">${esc(p.coin)}</td>
                         <td class="font-mono">$${fmtPrice(p.price)}</td>
                         <td class="font-mono ${cls}">${ch >= 0 ? '+' : ''}${ch.toFixed(2)}%</td>
-                        <td>${bar}</td>
+                        <td class="font-mono text-hyper-muted2">${fmtCompact(p.volume24h)}</td>
+                        <td class="font-mono text-hyper-muted2">${fmtCompact(p.open_interest_usd)}</td>
+                        <td class="font-mono ${fcls}">${p.funding_1h >= 0 ? '+' : ''}${p.funding_1h.toFixed(4)}%</td>
                     </tr>`;
                 }).join('');
             } catch(e) { /* пропускаем обновление */ }
@@ -396,6 +504,315 @@
         loadMarkets(); setInterval(loadMarkets, 30000);
         loadFunding(); setInterval(loadFunding, 60000);
     </script>
+    <script>
+        // ===== ЛОКАЛЬНЫЙ ПРОФИЛЬ (всё хранится в этом браузере) =====
+        const PKEY = 'rustdeck_profile_v1';
+        function loadProfile() {
+            try { return JSON.parse(localStorage.getItem(PKEY)) || null; } catch(e) { return null; }
+        }
+        function saveProfile() {
+            try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch(e) {}
+        }
+        let profile = loadProfile();
+        let currentWalletAddr = '';
+
+        function renderProfile() {
+            const area = $('profileArea');
+            if (!profile) {
+                area.innerHTML = '<button id="signInBtn" class="text-[11px] font-semibold px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider">Sign in</button>';
+                $('signInBtn').addEventListener('click', promptSignIn);
+            } else {
+                area.innerHTML = `<div class="flex items-center gap-2 text-[12px]">
+                    <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc(profile.name[0].toUpperCase())}</span>
+                    <span class="text-hyper-text font-semibold hidden sm:inline">${esc(profile.name)}</span>
+                    <button id="signOutBtn" class="text-[11px] text-hyper-muted hover:text-hyper-red transition-colors ml-1">Sign out</button>
+                </div>`;
+                $('signOutBtn').addEventListener('click', () => {
+                    profile = null;
+                    localStorage.removeItem(PKEY);
+                    renderProfile();
+                    renderChips();
+                    applyAlertSettings();
+                });
+            }
+        }
+
+        function promptSignIn() {
+            const name = prompt('Choose a display name for your local profile.\nIt is stored only in this browser — no server, no password.');
+            if (!name || !name.trim()) return;
+            profile = {
+                name: name.trim().slice(0, 24),
+                wallets: [],
+                alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, sound: true },
+                lastWallet: ''
+            };
+            saveProfile();
+            renderProfile();
+            renderChips();
+            applyAlertSettings();
+        }
+
+        // ===== СОХРАНЁННЫЕ КОШЕЛЬКИ =====
+        function renderChips() {
+            const wrap = $('walletChips');
+            const saveBtn = $('saveWalletBtn');
+            if (!profile) { wrap.classList.add('hidden'); wrap.innerHTML = ''; saveBtn.classList.add('hidden'); return; }
+            const wallets = profile.wallets || [];
+            if (!wallets.length) {
+                wrap.classList.add('hidden'); wrap.innerHTML = '';
+                if (currentWalletAddr) saveBtn.classList.remove('hidden');
+                return;
+            }
+            wrap.classList.remove('hidden');
+            wrap.innerHTML = wallets.map(w => `
+                <span class="wallet-chip ${w === currentWalletAddr ? 'active' : ''}" data-w="${w}" title="${w}">
+                    ${w.slice(0, 6)}…${w.slice(-4)}
+                    <span class="chip-x" data-x="${w}" title="Remove">✕</span>
+                </span>`).join('');
+            const isSaved = wallets.includes(currentWalletAddr);
+            saveBtn.classList.toggle('hidden', !currentWalletAddr);
+            saveBtn.textContent = isSaved ? '✓ Saved — click to remove' : '＋ Save wallet';
+        }
+
+        function toggleSaveWallet() {
+            if (!profile || !currentWalletAddr) return;
+            const i = (profile.wallets || []).indexOf(currentWalletAddr);
+            if (i >= 0) profile.wallets.splice(i, 1);
+            else (profile.wallets = profile.wallets || []).push(currentWalletAddr);
+            saveProfile();
+            renderChips();
+        }
+    </script>
+    <script>
+        // ===== LIVE ALERTS (звук + браузерные уведомления) =====
+        function getAlerts() {
+            return (profile && profile.alerts) || { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, sound: true };
+        }
+        function setAlerts(a) {
+            if (!profile) return;
+            profile.alerts = a;
+            saveProfile();
+        }
+
+        let watchTimer = null;
+        let prevState = null;
+        let audioCtx = null;
+
+        function updatePermBadge() {
+            const badge = $('alertsPerm');
+            if (!('Notification' in window)) { badge.textContent = 'unsupported'; badge.classList.remove('hidden'); return; }
+            const p = Notification.permission;
+            badge.textContent = p === 'granted' ? 'on' : p === 'denied' ? 'blocked' : 'ask';
+            badge.classList.remove('hidden');
+            badge.classList.toggle('text-hyper-teal', p === 'granted');
+        }
+
+        function applyAlertSettings() {
+            const a = getAlerts();
+            $('alertsToggle').checked = a.enabled;
+            $('evOpen').checked = a.onOpen;
+            $('evClose').checked = a.onClose;
+            $('evLiq').checked = a.onLiq;
+            $('evFill').checked = a.onFill;
+            $('evSound').checked = a.sound;
+            updatePermBadge();
+        }
+
+        function beep(negative) {
+            try {
+                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                o.type = 'sine';
+                o.frequency.value = negative ? 320 : 660;
+                g.gain.setValueAtTime(0.001, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+                o.connect(g).connect(audioCtx.destination);
+                o.start(); o.stop(audioCtx.currentTime + 0.45);
+            } catch(e) {}
+        }
+
+        function addFeedItem(ev) {
+            const feed = $('alertsFeed');
+            feed.classList.remove('hidden');
+            const div = document.createElement('div');
+            div.className = 'alert-feed-item';
+            const bad = ev.type === 'liq' || ev.type === 'close_loss';
+            const time = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+            div.innerHTML = `<span class="text-hyper-muted font-mono text-[10px] mr-2">${time}</span><span class="${bad ? 'text-hyper-red' : 'text-hyper-teal'} font-semibold">${esc(ev.title)}</span> <span class="text-hyper-muted2">${esc(ev.text)}</span>`;
+            feed.prepend(div);
+            while (feed.children.length > 20) feed.removeChild(feed.lastChild);
+        }
+    </script>
+    <script>
+        function fireAlert(ev, force) {
+            const a = getAlerts();
+            const allowed = { open: a.onOpen, close: a.onClose, close_profit: a.onClose, close_loss: a.onClose, liq: a.onLiq, fill: a.onFill, info: true };
+            if (!force && !allowed[ev.type]) return;
+            addFeedItem(ev);
+            if (a.sound) beep(ev.type === 'liq' || ev.type === 'close_loss');
+            if ('Notification' in window && Notification.permission === 'granted') {
+                try { new Notification('RustDeck — ' + ev.title, { body: ev.text }); } catch(e) {}
+            }
+        }
+
+        // Сравнение состояний: что произошло с момента прошлого опроса
+        function detectEvents(d) {
+            const events = [];
+            const prev = prevState;
+            prevState = d;
+            if (!prev) return events;
+
+            const prevKeys = new Set((prev.recent_trades || []).map(t =>
+                t.time + '|' + t.coin + '|' + t.side + '|' + t.px + '|' + t.sz));
+            (d.recent_trades || []).forEach(t => {
+                const key = t.time + '|' + t.coin + '|' + t.side + '|' + t.px + '|' + t.sz;
+                if (prevKeys.has(key)) return;
+                const dir = t.dir || t.side || '';
+                if (/liquidat/i.test(dir)) {
+                    events.push({ type: 'liq', title: 'LIQUIDATION', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · PnL ${pnlSign(t.closed_pnl)}` });
+                } else if (t.closed_pnl !== 0) {
+                    const good = t.closed_pnl > 0;
+                    events.push({
+                        type: good ? 'close_profit' : 'close_loss',
+                        title: good ? 'Closed in profit 🎉' : 'Closed in loss',
+                        text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · PnL ${pnlSign(t.closed_pnl)}`
+                    });
+                } else if (/open/i.test(dir)) {
+                    events.push({ type: 'open', title: 'Position opened', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${t.sz}` });
+                } else {
+                    events.push({ type: 'fill', title: 'New fill', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${t.sz}` });
+                }
+            });
+
+            // Страховка: позиция исчезла, а филла-закрытия в свежих не было
+            const hadCloseEv = events.some(e => e.type.startsWith('close') || e.type === 'liq');
+            const prevPos = {}, nowPos = {};
+            (prev.positions || []).forEach(p => prevPos[p.coin] = p);
+            (d.positions || []).forEach(p => nowPos[p.coin] = p);
+            Object.keys(prevPos).forEach(c => {
+                if (!nowPos[c] && !hadCloseEv) {
+                    events.push({ type: 'close', title: 'Position closed', text: `${c} position is no longer open` });
+                }
+            });
+            Object.keys(nowPos).forEach(c => {
+                if (!prevPos[c]) {
+                    events.push({ type: 'open', title: 'Position opened', text: `${c} ${nowPos[c].side} · $${fmtUsd(nowPos[c].size_usd)} @ $${fmtPrice(nowPos[c].entry)}` });
+                }
+            });
+            return events;
+        }
+    </script>
+    <script>
+        function startWatching() {
+            stopWatching();
+            prevState = null;
+            if (!currentWalletAddr) return;
+            const poll = async () => {
+                try {
+                    const r = await fetch('/api/wallet/' + currentWalletAddr);
+                    if (!r.ok) return;
+                    detectEvents(await r.json()).forEach(ev => fireAlert(ev));
+                } catch(e) {}
+            };
+            poll(); // первый опрос — база для сравнения, уведомлений не будет
+            watchTimer = setInterval(poll, 25000);
+        }
+
+        function stopWatching() {
+            if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+        }
+
+        // ===== Управление алертами =====
+        $('alertsToggle').addEventListener('change', function() {
+            const a = getAlerts();
+            a.enabled = this.checked;
+            setAlerts(a);
+            if (this.checked) {
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().then(() => updatePermBadge());
+                }
+                try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+                startWatching();
+                addFeedItem({ type: 'info', title: 'Alerts on', text: currentWalletAddr ? 'Watching ' + currentWalletAddr.slice(0, 10) + '…' : 'Track a wallet first — then it will be watched' });
+            } else {
+                stopWatching();
+                addFeedItem({ type: 'info', title: 'Alerts off', text: 'Monitoring stopped' });
+            }
+        });
+
+        $('alertsGear').addEventListener('click', () => $('alertsSettings').classList.toggle('hidden'));
+        [['evOpen','onOpen'], ['evClose','onClose'], ['evLiq','onLiq'], ['evFill','onFill'], ['evSound','sound']].forEach(([id, key]) => {
+            $(id).addEventListener('change', function() {
+                const a = getAlerts();
+                a[key] = this.checked;
+                setAlerts(a);
+            });
+        });
+        $('alertsTest').addEventListener('click', () => fireAlert({ type: 'info', title: 'Test alert', text: 'This is how alerts look and sound 🔔' }, true));
+
+        $('saveWalletBtn').addEventListener('click', toggleSaveWallet);
+        $('walletChips').addEventListener('click', e => {
+            const x = e.target.closest('.chip-x');
+            if (x) {
+                if (profile) {
+                    const i = (profile.wallets || []).indexOf(x.dataset.x);
+                    if (i >= 0) profile.wallets.splice(i, 1);
+                    saveProfile();
+                    renderChips();
+                }
+                return;
+            }
+            const chip = e.target.closest('.wallet-chip');
+            if (chip) {
+                $('walletAddress').value = chip.dataset.w;
+                trackWallet();
+            }
+        });
+
+        // ===== ЭКСПОРТ CSV =====
+        $('exportCsvBtn').addEventListener('click', async function() {
+            if (!currentWalletAddr) return;
+            const orig = this.textContent;
+            this.textContent = '…';
+            try {
+                const r = await fetch('/api/fills/' + currentWalletAddr + '?limit=500');
+                const j = await r.json();
+                const rows = [['coin', 'action', 'side', 'price', 'size', 'closed_pnl', 'fee', 'time_utc']];
+                (j.fills || []).forEach(f => rows.push([
+                    f.coin, f.dir || '', f.side || '', f.px, f.sz, f.closed_pnl, f.fee,
+                    f.time ? new Date(f.time).toISOString() : ''
+                ]));
+                const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'rustdeck_' + currentWalletAddr.slice(0, 10) + '_fills.csv';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(a.href);
+                this.textContent = '✓ Exported';
+                setTimeout(() => { this.textContent = orig; }, 1500);
+            } catch(e) {
+                this.textContent = orig;
+            }
+        });
+
+        // ===== Инициализация =====
+        renderProfile();
+        renderChips();
+        applyAlertSettings();
+        if (profile && profile.lastWallet) {
+            $('walletAddress').value = profile.lastWallet;
+            trackWallet();
+        }
+    </script>
+
+
+
+
 </body>
 </html>
 
