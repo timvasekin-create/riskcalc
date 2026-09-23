@@ -418,11 +418,16 @@ def _cmd_prices(chat_id):
 def _cmd_watch(chat_id, username, text):
     parts = text.split(maxsplit=1)
     addr = parts[1].strip() if len(parts) > 1 else ""
-    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
+    # Терпимо к формату: без 0x, в любом регистре, с лишними пробелами
+    addr = addr.lower()
+    if re.fullmatch(r"[0-9a-f]{40}", addr):
+        addr = "0x" + addr
+    if not re.fullmatch(r"0x[0-9a-f]{40}", addr):
         send_message(
             chat_id,
             "Usage: `/watch 0x4f2a…c3a9`\n\n"
             "Paste the *full Hyperliquid wallet address* (0x + 40 characters).\n"
+            "Or just send the address as a message — I'll get it.\n"
             "Works with *any* wallet — yours or any whale's.\n\n"
             "Included with your subscription (free trial: 7 days).",
         )
@@ -547,6 +552,9 @@ def handle_update(update):
         _cmd_unwatch(chat_id)
     elif text == "/watching":
         _cmd_watching(chat_id)
+    elif re.fullmatch(r"0x[0-9a-f]{40}", text.lower()) or re.fullmatch(r"[0-9a-f]{40}", text.lower()):
+        # Голый адрес кошелька (без команды) — сразу начинаем слежение
+        _cmd_watch(chat_id, username, "/watch " + text)
     elif text == "/status":
         _cmd_status(chat_id)
     elif text == "/help":

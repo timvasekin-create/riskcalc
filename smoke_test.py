@@ -115,8 +115,10 @@ try:
     try:
         status, body = get("/api/wallet/0x000000000000000000000000000000000000dEaD", timeout=20)
         w = json.loads(body)
-        log(f"WALLET API: {status}, account_value={w.get('account_value')}, positions={len(w.get('positions', []))}")
+        log(f"WALLET API: {status}, perps={w.get('account_value')}, spot={w.get('spot_value')}, total={w.get('account_total')}, spot_tokens={len(w.get('spot_tokens', []))}")
         assert "stats" in w, "нет stats в ответе"
+        assert "spot_value" in w, "нет spot_value в ответе"
+        assert "account_total" in w, "нет account_total в ответе"
     except urllib.error.HTTPError as e:
         log(f"WALLET API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:
@@ -169,18 +171,18 @@ try:
         assert abs(sub2["expires_at"] - sub1["expires_at"]) < 0.001, "trial ПРОДЛИЛСЯ — так нельзя!"
         log(f"TRIAL OK: expires_at не изменился при повторной привязке")
 
-        # /watch: привязка кошелька к подписке + /unwatch
+        # /watch: привязка кошелька к подписке + /unwatch (адрес нормализуется в lowercase)
         _bot._cmd_watch(777000, 'tester', '/watch 0x000000000000000000000000000000000000dEaD')
         conn = _bot._db()
         w1 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
         conn.close()
-        assert w1["watched_wallet"] == "0x000000000000000000000000000000000000dEaD", "/watch не сохранил кошелёк"
+        assert w1["watched_wallet"] == "0x000000000000000000000000000000000000dead", f"/watch сохранил неверный адрес: {w1['watched_wallet']}"
         _bot._cmd_unwatch(777000)
         conn = _bot._db()
         w2 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
         conn.close()
         assert w2["watched_wallet"] is None, "/unwatch не очистил кошелёк"
-        log("WATCH OK: /watch сохраняет кошелёк, /unwatch очищает")
+        log("WATCH OK: /watch сохраняет кошелёк (lowercase), /unwatch очищает")
 
         # /watch с кривым адресом — не сохраняет
         _bot._cmd_watch(777000, 'tester', '/watch notanaddress')
@@ -189,6 +191,32 @@ try:
         conn.close()
         assert w3["watched_wallet"] is None, "кривой адрес не должен сохраняться"
         log("WATCH OK: невалидный адрес отклонён")
+
+        # ГОЛЫЙ адрес без /watch — должен запускать слежение (как прислал юзер)
+        def _msg(t):
+            return {"message": {"chat": {"id": 777000}, "from": {"username": "tester"}, "text": t}}
+        _bot.handle_update(_msg("0x000000000000000000000000000000000000dEaD"))
+        conn = _bot._db()
+        w4 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w4["watched_wallet"] == "0x000000000000000000000000000000000000dead", "голый адрес 0x не распознан"
+        log("WATCH OK: голый адрес с 0x запускает слежение")
+
+        _bot.handle_update(_msg("0X000000000000000000000000000000000000DEAD"))  # верхний регистр
+        conn = _bot._db()
+        w5 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w5["watched_wallet"] == "0x000000000000000000000000000000000000dead", "0X uppercase не распознан"
+        log("WATCH OK: 0X uppercase нормализуется в lowercase")
+
+        _bot.handle_update(_msg("000000000000000000000000000000000000dEaD"))  # без 0x
+        conn = _bot._db()
+        w6 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w6["watched_wallet"] == "0x000000000000000000000000000000000000dead", "адрес без 0x не распознан"
+        log("WATCH OK: адрес без 0x распознаётся")
+
+        _bot._cmd_unwatch(777000)
         conn = _bot._db()
         conn.execute("DELETE FROM subscribers WHERE chat_id=?", (777000,))
         conn.commit()

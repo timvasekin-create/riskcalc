@@ -147,6 +147,7 @@
                         <div class="stat-card">
                             <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Account Value</div>
                             <div id="stAccount" class="text-xl font-bold text-white font-mono">$0.00</div>
+                            <div id="stAccountNote" class="text-[10px] text-hyper-muted mt-0.5">Perps — · Spot —</div>
                         </div>
                         <div class="stat-card">
                             <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Unrealized PnL</div>
@@ -194,6 +195,17 @@
                         </div>
                     </div>
                     <div id="noOrders" class="hidden text-[12px] text-hyper-muted mb-5">No open orders.</div>
+
+                    <!-- Спот-балансы -->
+                    <div id="spotBlock" class="mb-5">
+                        <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-2">Spot Holdings <span class="normal-case tracking-normal">(Hyperliquid spot account)</span></div>
+                        <div class="overflow-x-auto border border-hyper-border rounded-lg">
+                            <table class="data-table" id="spotTable">
+                                <thead><tr><th>Coin</th><th>Amount</th><th>Price</th><th>Value</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
 
                     <div>
                         <div class="flex items-center justify-between mb-2">
@@ -385,7 +397,8 @@
     <script>
         function renderWallet(d) {
             window.__walletData = d;
-            $('stAccount').textContent = '$' + fmtUsd(d.account_value);
+            $('stAccount').textContent = '$' + fmtUsd(d.account_total);
+            $('stAccountNote').textContent = 'Perps $' + fmtUsd(d.account_value) + ' · Spot $' + fmtUsd(d.spot_value);
             const up = $('stUnrealized');
             up.textContent = pnlSign(d.unrealized_pnl);
             up.className = 'text-xl font-bold font-mono ' + pnlCls(d.unrealized_pnl);
@@ -421,6 +434,20 @@
                 </tr>`).join('');
             $('ordersBlock').classList.toggle('hidden', !(d.open_orders || []).length);
             $('noOrders').classList.toggle('hidden', !!(d.open_orders || []).length);
+
+            // Спот-балансы (топ-10, остальное в сумме)
+            const sTokens = d.spot_tokens || [];
+            const sRest = sTokens.slice(10).reduce((acc, s) => acc + s.usd, 0);
+            const sBody = $('spotTable').querySelector('tbody');
+            sBody.innerHTML = sTokens.slice(0, 10).map(s => `
+                <tr>
+                    <td class="font-semibold">${esc(s.coin)}</td>
+                    <td class="font-mono">${s.amount}</td>
+                    <td class="font-mono">${s.price >= 1 ? '$' + fmtUsd(s.price) : '$' + s.price.toFixed(6)}</td>
+                    <td class="font-mono">$${fmtUsd(s.usd)}</td>
+                </tr>`).join('')
+                + (sRest > 0.01 ? `<tr><td colspan="3" class="text-hyper-muted">…and ${sTokens.length - 10} more</td><td class="font-mono">$${fmtUsd(sRest)}</td></tr>` : '');
+            $('spotBlock').classList.toggle('hidden', !sTokens.length);
 
             const tBody = $('tradesTable').querySelector('tbody');
             tBody.innerHTML = (d.recent_trades || []).map(t => {

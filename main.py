@@ -293,6 +293,7 @@ async def api_wallet(address: str):
         state = _hl_info({"type": "clearinghouseState", "user": address})
         fills = _hl_info({"type": "userFills", "user": address})
         orders = _hl_info({"type": "frontendOpenOrders", "user": address})
+        spot = _hl_info({"type": "spotClearinghouseState", "user": address})
     except Exception:
         return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
 
@@ -365,6 +366,31 @@ async def api_wallet(address: str):
         except (TypeError, ValueError):
             continue
 
+    # Спотовые цены: token index -> имя -> mark-цена (кэш 60 сек)
+    spot_cache = getattr(api_wallet, "_spot_cache", None) or {"ts": 0.0, "map": {}}
+    if now - spot_cache["ts"] > 60:
+        try:
+            sm = _hl_info({"type": "spotMetaAndAssetCtxs"})
+            meta, sctxs = sm[0], sm[1]
+            tok_name = {t["index"]: t["name"] for t in meta.get("tokens", [])}
+            pmap = {}
+            for u, c in zip(meta.get("universe", []) or [], sctxs or []):
+                try:
+                    px = float(c.get("markPx") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if px <= 0 or not u.get("tokens"):
+                    continue
+                base = tok_name.get(u["tokens"][0])
+                if base:
+                    pmap[base] = px
+                pmap[(u.get("name") or "").split("/")[0]] = px
+            spot_cache = {"ts": now, "map": pmap}
+            api_wallet._spot_cache = spot_cache
+        except Exception:
+            pass
+    spot_price_map = spot_cache["map"]
+
     # Последние сделки (все типы, не только закрытия)
     recent_raw = sorted(fills or [], key=lambda f: f.get("time") or 0, reverse=True)[:12]
     recent = []
@@ -379,9 +405,35 @@ async def api_wallet(address: str):
             "time": f.get("time"),
         })
 
+    # Спот-баланс: токены оцениваем по mark-ценам спотового рынка Hyperliquid
+    spot_value = 0.0
+    spot_tokens = []
+    for b in (spot or {}).get("balances") or []:
+        try:
+            total = float(b.get("total") or 0)
+        except (TypeError, ValueError):
+            continue
+        if total <= 0:
+            continue
+        coin = b.get("coin")
+        px = 1.0 if coin == "USDC" else float(spot_price_map.get(coin, 0))
+        usd = total * px
+        spot_value += usd
+        if usd >= 0.01:
+            spot_tokens.append({
+                "coin": coin,
+                "amount": total,
+                "price": px,
+                "usd": round(usd, 2),
+            })
+    spot_tokens.sort(key=lambda x: x["usd"], reverse=True)
+
     data_out = {
         "address": address,
         "account_value": round(account_value, 2),
+        "spot_value": round(spot_value, 2),
+        "account_total": round(account_value + spot_value, 2),
+        "spot_tokens": spot_tokens,
         "withdrawable": round(withdrawable, 2),
         "margin_used": round(margin_used, 2),
         "notional_position": round(ntl_pos, 2),
