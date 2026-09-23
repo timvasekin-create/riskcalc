@@ -8,6 +8,11 @@ env/
 *.log
 .DS_Store
 
+# Telegram-бот: локальная БД и секреты (НЕ коммитим!)
+rustdeck.db
+*.db
+.env
+
 # Временные файлы локальных тестов
 smoke_out.txt
 uv_out.txt

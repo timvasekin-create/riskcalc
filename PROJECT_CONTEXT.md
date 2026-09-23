@@ -58,6 +58,21 @@ riskcalc/
 - render.yaml — конфиг для второго сервиса about (статика)
 - about/index.html — лендинг RustDeck (hero, карточки инструментов, футер с реф-ссылкой)
 - smoke_test.py — локальный тест всех роутов и API (`python smoke_test.py`)
+- tg_test.py — тест Telegram-API привязки (запуск: BOT_TOKEN=... python tg_test.py)
+
+## TELEGRAM-БОТ (сделано)
+- @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,
+  отдельный воркер Render не нужен). Файл bot.py, только stdlib.
+- Команды бота: /start [код], /link <код>, /prices (живые цены), /status, /help
+- Привязка сайт↔бот через 6-значный код (живёт 15 мин):
+  сайт POST /api/tg/link/start → код + deep-link → юзер жмёт кнопку/шлёт /link КОд
+  → сайт опрашивает GET /api/tg/link/status/{code} → linked
+- Подписка: при привязке пишется tier='trial', expires_at = +7 дней (тариф-фундамент)
+- БД: SQLite rustdeck.db (git-игнор). ВНИМАНИЕ: диск Render эфемерный —
+  при деплое база сбрасывается; позже переехать на постоянное хранилище.
+- Токен бота: ТОЛЬКО через переменную окружения BOT_TOKEN (Render Dashboard),
+  в git НЕ коммитить. Frontend: карточка «Telegram Alerts» в сайдбаре с кнопкой
+  Connect Telegram → код → «Open Bot & Confirm» → автоопрос статуса.
 
 ## ИДЕИ НА БУДУЩЕЕ (обсудить)
 - Стартовый экран RustDeck: возможно НЕ about.rustdeck.app, а app.rustdeck.app

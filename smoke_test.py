@@ -61,13 +61,30 @@ try:
     except Exception as e:
         log("PRICES WARN:", repr(e))
 
+    # Telegram link API: локально без BOT_TOKEN ждём 503 (bot_disabled)
+    try:
+        status, body = get("/api/tg/link/status/000000", timeout=8)
+        log(f"TG status endpoint: {status} {body[:100]}")
+    except urllib.error.HTTPError as e:
+        log(f"TG status endpoint: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG status endpoint: {e.code} — ПРОВЕРИТЬ")
+    except Exception as e:
+        log("TG status WARN:", repr(e))
+    try:
+        req = urllib.request.Request(BASE + "/api/tg/link/start", data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            log(f"TG start endpoint: {r.status} (бот включён?)")
+    except urllib.error.HTTPError as e:
+        log(f"TG start endpoint: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG start endpoint: {e.code} — ПРОВЕРИТЬ")
+    except Exception as e:
+        log("TG start WARN:", repr(e))
+
     _, sm = get("/sitemap.xml")
     for p in ["/ethereum-risk-calculator", "/liquidation-calculator", "/leverage-calculator", "/solana-risk-calculator"]:
         assert p in sm, f"sitemap не содержит {p}"
     log("SITEMAP OK: все новые страницы на месте")
 
     _, html = get("/")
-    for must in ["tickerItems", "Rust<span", "api/prices", "applyLivePrices", "entryTouchedByUser", "asset-price"]:
+    for must in ["tickerItems", "Rust<span", "api/prices", "applyLivePrices", "entryTouchedByUser", "asset-price", "tgLinkBtn", "Connect Telegram"]:
         assert must in html, f"HTML не содержит {must}"
     for gone in ['data-mode="cross"', 'id="saveBtn"', 'availDisplay', ">Limit<", "Cross<"]:
         assert gone not in html, f"HTML всё ещё содержит {gone}"

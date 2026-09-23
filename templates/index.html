@@ -426,6 +426,37 @@
                     </div>
                 </div>
 
+                <!-- Telegram Alerts: привязка через код, 7 дней бесплатно -->
+                <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5">
+                    <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-hyper-teal" viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.6c.2-1-.7-1.8-1.6-1.4L2.7 10.1c-1 .4-1 1.9.1 2.2l4.4 1.4 1.7 5.3c.3.9 1.4 1.1 2 .4l2.5-2.6 4.6 3.4c.8.6 2 .2 2.2-.8l2.7-14.8zM8.6 13.1l9.7-6.1c.2-.1.4.2.2.3l-8 7.4-.3 3.3-1.6-4.9z"/></svg>
+                        Telegram Alerts
+                    </h3>
+                    <p class="text-[12px] text-hyper-muted2 mb-3 leading-relaxed">
+                        Link your Telegram and get trade alerts, price pings and daily summaries.
+                        <span class="text-hyper-teal font-semibold">7 days free</span> — no card needed.
+                    </p>
+                    <button type="button" id="tgLinkBtn" class="w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-2.5 rounded-lg transition-colors text-[12px] uppercase tracking-wider">
+                        Connect Telegram
+                    </button>
+                    <div id="tgLinkBox" class="hidden mt-3 bg-hyper-bg border border-hyper-border rounded-lg p-4 text-center">
+                        <div class="text-[10px] text-hyper-muted uppercase tracking-[0.2em] mb-2">Your link code</div>
+                        <div id="tgCode" class="text-3xl font-bold text-hyper-teal font-mono tracking-[0.25em] mb-3">······</div>
+                        <a id="tgDeepLink" href="#" target="_blank" rel="noopener"
+                           class="block w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-2.5 rounded-lg transition-colors text-[12px] uppercase tracking-wider mb-3">
+                            Open Bot &amp; Confirm
+                        </a>
+                        <div class="text-[11px] text-hyper-muted2 leading-relaxed">
+                            Or send to <span id="tgBotName" class="text-hyper-teal font-mono">bot</span>:<br>
+                            <span class="font-mono text-hyper-text">/link <span id="tgCodeInline">······</span></span>
+                        </div>
+                        <div id="tgLinkStatus" class="mt-3 text-[11px] text-hyper-muted flex items-center justify-center gap-2">
+                            <span class="w-1.5 h-1.5 rounded-full bg-hyper-yellow animate-pulse"></span>
+                            Waiting for confirmation…
+                        </div>
+                    </div>
+                </div>
+
                 <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5">
                     <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
                         <svg class="w-4 h-4 text-hyper-yellow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
@@ -1263,6 +1294,63 @@ Breakeven: ${r.breakeven.toFixed(6)}`;
                 btn.classList.add('text-hyper-teal','border-hyper-teal');
                 setTimeout(() => { btn.textContent = orig; btn.classList.remove('text-hyper-teal','border-hyper-teal'); }, 1500);
             });
+        });
+
+        // ===== Привязка Telegram (код + deep-link + опрос статуса) =====
+        const tgLinkBtn = document.getElementById('tgLinkBtn');
+        const tgLinkBox = document.getElementById('tgLinkBox');
+        const tgLinkStatus = document.getElementById('tgLinkStatus');
+        let tgPollTimer = null;
+
+        function tgSetStatus(html, color) {
+            tgLinkStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${color}"></span> ${html}`;
+        }
+
+        tgLinkBtn.addEventListener('click', async function() {
+            this.disabled = true;
+            const orig = this.textContent;
+            this.textContent = '…';
+            try {
+                const r = await fetch('/api/tg/link/start', { method: 'POST' });
+                const j = await r.json();
+                if (!r.ok) {
+                    tgLinkBtn.textContent = orig;
+                    tgLinkBtn.disabled = false;
+                    alert('Telegram linking is temporarily unavailable. Try later.');
+                    return;
+                }
+                document.getElementById('tgCode').textContent = j.code;
+                document.getElementById('tgCodeInline').textContent = j.code;
+                if (j.deep_link) document.getElementById('tgDeepLink').href = j.deep_link;
+                if (j.bot_username) document.getElementById('tgBotName').textContent = '@' + j.bot_username;
+                tgLinkBox.classList.remove('hidden');
+                tgSetStatus('Waiting for confirmation…', 'bg-hyper-yellow animate-pulse');
+
+                // Опрос статуса раз в 3 сек, максимум 5 минут (код живёт 15)
+                if (tgPollTimer) clearInterval(tgPollTimer);
+                const started = Date.now();
+                tgPollTimer = setInterval(async () => {
+                    if (Date.now() - started > 5 * 60 * 1000) {
+                        clearInterval(tgPollTimer);
+                        tgSetStatus('Timed out. Generate a new code.', 'bg-hyper-red');
+                        return;
+                    }
+                    try {
+                        const s = await (await fetch('/api/tg/link/status/' + j.code)).json();
+                        if (s.status === 'linked') {
+                            clearInterval(tgPollTimer);
+                            tgSetStatus('✅ Telegram linked! Check your DMs.', 'bg-hyper-teal');
+                            document.getElementById('tgDeepLink').textContent = '✓ Linked';
+                        } else if (s.status === 'expired') {
+                            clearInterval(tgPollTimer);
+                            tgSetStatus('Code expired. Generate a new one.', 'bg-hyper-red');
+                        }
+                    } catch(e) { /* сеть моргнула — продолжаем опрос */ }
+                }, 3000);
+            } catch(e) {
+                tgLinkBtn.textContent = orig;
+                tgLinkBtn.disabled = false;
+            }
         });
 
         updateAdvSummary();

@@ -4,11 +4,16 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import os
 
+# ===== Telegram-бот (фоновый поток, не мешает сайту) =====
+import bot as tg_bot
+
 app = FastAPI(
-    title="Crypto Risk Calculator",
+    title="RustDeck — Crypto Trading Tools",
     description="Free position size and risk calculator for Hyperliquid, Bybit, and Bitcoin traders.",
-    version="1.0.0",
+    version="2.0.0",
 )
+
+BOT_ENABLED = tg_bot.start_bot_thread()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "templates", "index.html")
@@ -244,3 +249,27 @@ async def api_prices():
     PRICE_CACHE["data"] = data_out
     PRICE_CACHE["ts"] = now
     return data_out
+
+# ===== API: привязка Telegram =====
+@app.post("/api/tg/link/start")
+async def tg_link_start():
+    """Сайт просит 6-значный код привязки. Юзер отправит его боту."""
+    if not BOT_ENABLED:
+        return JSONResponse({"error": "bot_disabled"}, status_code=503)
+    code = tg_bot.create_link_code()
+    if not code:
+        return JSONResponse({"error": "code_generation_failed"}, status_code=500)
+    username = tg_bot.get_bot_username()
+    return {
+        "code": code,
+        "ttl_seconds": tg_bot.CODE_TTL,
+        "bot_username": username,  # может быть None, если Telegram недоступен
+        "deep_link": f"https://t.me/{username}?start={code}" if username else None,
+    }
+
+@app.get("/api/tg/link/status/{code}")
+async def tg_link_status(code: str):
+    """Сайт опрашивает раз в 3 сек: привязался ли юзер."""
+    if not BOT_ENABLED:
+        return JSONResponse({"error": "bot_disabled"}, status_code=503)
+    return tg_bot.link_code_status(code)

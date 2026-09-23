@@ -19,6 +19,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      # Токен Telegram-бота задаётся ВРУЧНУЮ в Render Dashboard → Environment
+      # (sync: false = Render не ждёт его в репозитории)
+      - key: BOT_TOKEN
+        sync: false
 
   # --- Промо-лендинг (статика, без бэкенда) ---
   - type: web
