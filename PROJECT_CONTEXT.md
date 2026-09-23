@@ -8,9 +8,10 @@ RustDeck — набор бесплатных инструментов для к�
 заложенную сумму: $5, $10, $50, 1% и т.д.).
 
 Домены (план):
+- **rustdeck.app** (корень) — главная-хаб экосистемы (app/index.html)
 - **calc.rustdeck.app** — калькулятор (продакшн, живой)
-- **about.rustdeck.app** — промо-лендинг RustDeck (в разработке)
 - **trade.rustdeck.app** — будущий трекер сделок / статистика кошелька
+- **blog.rustdeck.app** — будущий блог
 - riskcalc.onrender.com — старый адрес, живой
 - Репозиторий: https://github.com/timvasekin-create/riskcalc
 - Хостинг: Render (Free), DNS: Porkbun → Cloudflare → Render, UptimeRobot пингует каждые 5 мин
@@ -25,40 +26,42 @@ RustDeck — набор бесплатных инструментов для к�
 riskcalc/
 ├── main.py               # FastAPI: SEO-роуты, /api/calculate, /api/prices, robots, sitemap
 ├── requirements.txt      # fastapi, uvicorn[standard], pydantic
-├── render.yaml           # Blueprint: 2 сервиса (calc + about) на бесплатном плане
+├── render.yaml           # Blueprint: calc (python) + app-хаб (статика) на бесплатном плане
 ├── PROJECT_CONTEXT.md    # этот файл
 ├── templates/
-│   └── index.html        # весь фронтенд: HTML + JS + CSS (~1200 строк)
-└── about/
-    └── index.html        # промо-лендинг RustDeck для about.rustdeck.app (статика)
+│   └── index.html        # калькулятор: весь фронтенд HTML + JS + CSS
+└── app/
+    └── index.html        # ГЛАВНАЯ rustdeck.app: хаб экосистемы (карточки инструментов,
+                          #   живой тикер, roadmap) — ссылки на поддомены
 
 ## РЕБРЕНДИНГ (сделан)
 Бренд: **RustDeck** (логотип: молния + "Rust**Deck**"), стиль Hyperliquid сохранён:
 фон #0a0e13, бирюза #50d2c1, красный #f6465d, шрифт Inter.
 
 ## ЧТО УЖЕ СДЕЛАНО
-- Ребрендинг RiskCalc → RustDeck (шапка, футер, title, Copy Results)
-- Убраны декоративные кнопки: Cross/Isolated/Unified, табы Market/Limit/Pro,
-  кнопка Save State (сохранение в localStorage работает автоматически каждые 5 сек),
-  строка Available to Trade (дублировала Own Margin)
-- Живой тикер топ-5 монет (BTC, ETH, SOL, HYPE, BNB): цена + 24h%,
-  обновление каждые 30 сек. Источник: свой бэкенд /api/prices (кэш 30 сек),
-  фолбэк — прямые запросы к Binance и Hyperliquid API из браузера
-- /api/prices — серверный прокси к Binance + Hyperliquid (без ключей, бесплатно),
-  отдаёт ВСЕ 12 монет из списка активов (BTC, ETH, SOL, HYPE, BNB, XRP, DOGE,
-  LINK, AVAX, ARB, SUI, TIA), резервный источник — CoinGecko
-- ЖИВАЯ ПРИВЯЗКА ЦЕН: кнопки активов показывают актуальную цену и 24h%,
-  Entry Price автоматически заполняется живой ценой выбранного актива и
-  обновляется каждые 30 сек. Если юзер вручную правил Entry Price — живая цена
-  его не перезаписывает (флаг entryTouchedByUser); повторный клик по активу
-  снова включает автопривязку. Сохранённая в localStorage цена тоже не перезаписывается.
-- 4 новые SEO-страницы: /ethereum-risk-calculator, /solana-risk-calculator,
-  /leverage-calculator, /liquidation-calculator (один шаблон, SEO через JS)
-- Sitemap включает все 8 страниц
-- render.yaml — конфиг для второго сервиса about (статика)
-- about/index.html — лендинг RustDeck (hero, карточки инструментов, футер с реф-ссылкой)
-- smoke_test.py — локальный тест всех роутов и API (`python smoke_test.py`)
-- tg_test.py — тест Telegram-API привязки (запуск: BOT_TOKEN=... python tg_test.py)
+- Ребрендинг RiskCalc → RustDeck; весь пользовательский текст — ТОЛЬКО на английском
+  (в т.ч. бот; комментарии в коде остаются на русском)
+- Убраны декоративные кнопки калькулятора: Cross/Isolated/Unified, Market/Limit/Pro,
+  Save State, Available to Trade; футер калькулятора почищен (только Home + Telegram Bot)
+- Живой тикер и живые цены: /api/prices (Binance + Hyperliquid, кэш 30с, все 12 монет)
+- Живая привязка цен: Entry Price автозаполняется ценой выбранного актива
+- Telegram-бот @RustDeckcryptobot: /start, /link <код>, /prices (Binance+HL, БЕЗ CoinGecko —
+  он блокирует датацентр-IP), /status, /help. Все сообщения на английском.
+  Привязка сайт↔бот через 6-значный код (15 мин), trial 7 дней, SQLite (эфемерная на Render!)
+- ГЛАВНАЯ rustdeck.app (app/index.html) — рабочее приложение, НЕ лендинг:
+  * WALLET TRACKER (главная фича): вводишь любой HL-адрес → account value, unrealized/realized
+    PnL, win rate, открытые позиции (liq distance!), последние 12 сделок. Бэкенд
+    /api/wallet/{address} через публичный API Hyperliquid (clearinghouseState + userFills),
+    кэш 30с. Валидация адреса 0x+40hex.
+  * LIVE MARKETS: таблица 12 монет (цена, 24h%, тренд-бар), /api/prices
+  * FUNDING RATES: топ-8highest/lowest по ставке HL, /api/funding.
+    ВАЖНО: predictedFundings возвращает список кортежей [coin, [[exchange, {...}],...]],
+    биржа называется "HlPerp", fundingRate за fundingIntervalHours!
+  * Telegram CTA + roadmap-плитки. Калькулятор с главной УБРАН (не мейн-функция,
+    живёт тихо на calc.rustdeck.app)
+- Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
+  calc.rustdeck.app/localhost → калькулятор
+- smoke_test.py — все роуты, host-роутинг, /api/wallet, /api/funding
 
 ## TELEGRAM-БОТ (сделано)
 - @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,
@@ -75,9 +78,8 @@ riskcalc/
   Connect Telegram → код → «Open Bot & Confirm» → автоопрос статуса.
 
 ## ИДЕИ НА БУДУЩЕЕ (обсудить)
-- Стартовый экран RustDeck: возможно НЕ about.rustdeck.app, а app.rustdeck.app
-  (или другой нейминг) — единая точка входа со выбором инструмента. Лендинг about/
-  уже готов как основа, нейминг легко поменять.
+- Стартовый экран решён: корень rustdeck.app → хаб (папка app/). Нейминг поддоменов
+  гибкий: app./start./hub. — DNS меняется за минуту.
 - Смена доменов: калькулятор — не «мейн функция», весь проект развивается как
   экосистема trading tools под брендом RustDeck.
 
@@ -108,12 +110,32 @@ take_profit (может быть авторассчитан по R:R), leverage 
 
 ## ПЛАН (roadmap)
 1. ✅ Ребрендинг + чистка UI + живой тикер + новые SEO-страницы
-2. ✅ Лендинг about.rustdeck.app (render.yaml готов, нужно добавить сервис в Render)
-3. Telegram-бот (код бота лежит отдельно: D:\hl_bot — уведомления о сделках, стате, SL/TP)
-4. trade.rustdeck.app — трекер сделок по кошельку Hyperliquid (публичный API HL,
-   чтение fill'ов: win rate, avg R:R, история). Free-базово, премиум — потом.
-5. Блог со статьями (How to Calculate Position Size on Hyperliquid и т.д.)
-6. Индексация в Google (Search Console + sitemap), потом другие биржи
+2. ✅ Telegram-бот @RustDeckcryptobot (привязка кодом, trial 7 дней, /prices)
+3. ✅ Главная-хаб rustdeck.app (app/index.html): карточки инструментов, ссылки на поддомены
+4. ✅ Host-роутинг: ОДИН сервис riskcalc.onrender.com отдаёт и хаб, и калькулятор
+   (main.py смотрит на Host-заголовок: rustdeck.app → хаб, calc./localhost → калькулятор)
+5. 🔄 Домены: Render Dashboard → сервис → Settings → Custom Domains → добавить
+   rustdeck.app и www.rustdeck.app (calc.rustdeck.app уже добавлен).
+   DNS Porkbun: ALIAS корень → riskcalc.onrender.com; CNAME calc → riskcalc.onrender.com
+   (A-запись НЕ использовать — у Render нет статического IP; Blueprint НЕ нужен)
+6. trade.rustdeck.app — трекер сделок по кошельку Hyperliquid (публичный API HL,
+   чтение fill'ов: win rate, avg R:R, история) + бэкенд /api/wallet/{address}.
+   Монетизация: Free (просмотр любого кошелька) / Pro (сохранённые кошельки, алерты)
+7. Уведомления бота о сделках (интеграция логики hl_bot с D:\hl_bot)
+8. Блог blog.rustdeck.app со статьями (пози сайзинг, ликвидации, R:R психология)
+9. Калькулятор-апгрейд (отличие от конкурентов): fee-пресеты бирж, funding rate,
+   режим «сделка недели» и т.д.
+10. Индексация Google: GSC ресурс домена *.rustdeck.app через DNS TXT + sitemap
+
+## ЭКОСИСТЕМА ФУНКЦИЙ RUSTDECK (что показываем на главной)
+LIVE:      Risk Calculator (calc.) — авторасчёт SL/TP, ликвидация, живые цены
+LIVE BETA: Telegram Bot (@RustDeckcryptobot) — /prices, привязка, trial
+IN DEV:    Wallet Tracker (trade.) — win rate, PnL, история, watch трейдеров
+SOON:      Price & Position Alerts (через бота) — уровни цены, близость ликвидации
+PLANNED:   Blog (blog.) — гайды по риску
+COMING:    RustDeck Pro — сохранённые кошельки, unlimited alerts, журнал сделок
+ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade journal,
+           copy-trade watch
 
 ## ПРАВИЛА РАБОТЫ
 - Тестировать локально перед push (uvicorn main:app --reload → 127.0.0.1:8000)

@@ -90,6 +90,45 @@ try:
         assert gone not in html, f"HTML всё ещё содержит {gone}"
     log("HTML OK: тикер на месте, мусор удалён")
 
+    # Host-роутинг: Host rustdeck.app → хаб, Host calc.rustdeck.app → калькулятор
+    req = urllib.request.Request(BASE + "/", headers={"Host": "rustdeck.app"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        hub = r.read().decode("utf-8", "replace")
+    for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable", "fundingHigh", "</html>"]:
+        assert must in hub, f"Хаб не содержит {must}"
+    assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
+    log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
+
+    req2 = urllib.request.Request(BASE + "/", headers={"Host": "calc.rustdeck.app"})
+    with urllib.request.urlopen(req2, timeout=8) as r:
+        calc_page = r.read().decode("utf-8", "replace")
+    assert "Calculate Position" in calc_page, "calc. должен отдавать калькулятор"
+    assert "Wallet Tracker" not in calc_page, "калькулятор не должен быть хабом"
+    # Футер калькулятора: только валидные ссылки
+    for gone in ["bitcoin-risk-calculator", "bybit-calculator", "/leverage-calculator"]:
+        assert gone not in calc_page.split("footer")[1], "в футере калькулятора остались невалидные ссылки"
+    log("CALC HOST OK: калькулятор отдаётся, футер почищен")
+
+    # Wallet API: реальный адрес (валидный формат; может быть 0 сделок — это ок)
+    try:
+        status, body = get("/api/wallet/0x000000000000000000000000000000000000dEaD", timeout=20)
+        w = json.loads(body)
+        log(f"WALLET API: {status}, account_value={w.get('account_value')}, positions={len(w.get('positions', []))}")
+        assert "stats" in w, "нет stats в ответе"
+    except urllib.error.HTTPError as e:
+        log(f"WALLET API: {e.code} (HL может быть недоступен локально)")
+    except Exception as e:
+        log("WALLET API WARN:", repr(e))
+
+    # Funding API
+    try:
+        status, body = get("/api/funding", timeout=20)
+        f = json.loads(body)
+        n = len(f.get("funding", []))
+        log(f"FUNDING API: {status}, {n} монет")
+    except Exception as e:
+        log("FUNDING API WARN:", repr(e))
+
     log("FAILS:", fails)
     log("ALL SMOKE TESTS PASSED" if fails == 0 else "SOME CHECKS FAILED")
 except Exception as e:

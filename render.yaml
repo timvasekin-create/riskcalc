@@ -1,14 +1,15 @@
-# ===== Render Blueprint =====
-# Два сервиса RustDeck на бесплатном плане:
-#   1) calc  — калькулятор (main.py + templates/)      → calc.rustdeck.app
-#   2) about — промо-лендинг (about/ статика)          → about.rustdeck.app
+# ===== Render (один сервис на все домены) =====
+# Сервис riskcalc.onrender.com обслуживает:
+#   - calc.rustdeck.app → калькулятор (templates/index.html)
+#   - rustdeck.app (корень) → главная-хаб (app/index.html) — выбирается по Host-заголовку
 #
-# Как применить: Render Dashboard → New → Blueprint → выбери этот репозиторий.
-# Render сам прочитает render.yaml и создаст оба сервиса.
-# Домены привязываются в Settings → Custom Domains (CNAME на render через Cloudflare).
+# DNS в Porkbun:
+#   ALIAS (корень, Host пусто)  → riskcalc.onrender.com   → rustdeck.app
+#   CNAME  calc                 → riskcalc.onrender.com   → calc.rustdeck.app
+# (A-запись НЕ использовать — у Render нет статического IP!)
+# Домены добавляются: Render Dashboard → сервис → Settings → Custom Domains.
 
 services:
-  # --- Калькулятор (текущий сайт) ---
   - type: web
     name: rustdeck-calc
     runtime: python
@@ -20,17 +21,5 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       # Токен Telegram-бота задаётся ВРУЧНУЮ в Render Dashboard → Environment
-      # (sync: false = Render не ждёт его в репозитории)
       - key: BOT_TOKEN
         sync: false
-
-  # --- Промо-лендинг (статика, без бэкенда) ---
-  - type: web
-    name: rustdeck-about
-    runtime: static
-    plan: free
-    staticPublishPath: ./about
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html

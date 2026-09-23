@@ -17,6 +17,7 @@ BOT_ENABLED = tg_bot.start_bot_thread()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "templates", "index.html")
+HUB_PATH = os.path.join(BASE_DIR, "app", "index.html")
 
 # ===== HEAD-обработчик для Render health check =====
 @app.head("/")
@@ -24,8 +25,14 @@ async def head_root():
     return Response(status_code=200)
 
 # ===== SEO-роуты =====
+# Корень " /": если домен rustdeck.app (корневой) — отдаём ГЛАВНУЮ-ХАБ,
+# если calc.rustdeck.app / localhost / onrender — калькулятор.
+# Так один сервис обслуживает оба домена, второй сервис Render не нужен.
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
+    host = (request.headers.get("host") or "").lower().split(":")[0]
+    if host in ("rustdeck.app", "www.rustdeck.app"):
+        return FileResponse(HUB_PATH)
     return FileResponse(INDEX_PATH)
 
 @app.get("/bitcoin-risk-calculator", response_class=HTMLResponse)
@@ -140,6 +147,8 @@ import urllib.request
 import urllib.error
 import json as _json
 
+HL_INFO_URL = "https://api-ui.hyperliquid.xyz/info"
+
 PRICE_CACHE: dict = {"data": None, "ts": 0.0}
 PRICE_TTL = 30  # секунд
 
@@ -248,6 +257,170 @@ async def api_prices():
     data_out = {"updated": int(now), "prices": result}
     PRICE_CACHE["data"] = data_out
     PRICE_CACHE["ts"] = now
+    return data_out
+
+# ===== API: Wallet Tracker (Hyperliquid публичный API, без ключей) =====
+import re as _re
+
+WALLET_CACHE: dict = {}
+WALLET_TTL = 30  # секунд
+
+def _hl_info(payload: dict, timeout: float = 10.0):
+    """POST к Hyperliquid info API."""
+    return _fetch_json(HL_INFO_URL, payload=payload, timeout=timeout)
+
+@app.get("/api/wallet/{address}")
+async def api_wallet(address: str):
+    """Статистика любого Hyperliquid-кошелька: баланс, PnL, win rate,
+    открытые позиции и последние сделки. Кэш 30 сек."""
+    address = (address or "").strip()
+    if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        return JSONResponse({"error": "invalid_address"}, status_code=400)
+
+    now = _time.time()
+    key = address.lower()
+    cached = WALLET_CACHE.get(key)
+    if cached and now - cached["ts"] < WALLET_TTL:
+        return cached["data"]
+
+    try:
+        state = _hl_info({"type": "clearinghouseState", "user": address})
+        fills = _hl_info({"type": "userFills", "user": address})
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+
+    margin = state.get("marginSummary") or {}
+    account_value = float(margin.get("accountValue") or 0)
+    margin_used = float(margin.get("totalMarginUsed") or 0)
+    ntl_pos = float(margin.get("totalNtlPos") or 0)
+    withdrawable = float(state.get("withdrawable") or 0)
+
+    # Открытые позиции
+    positions = []
+    unrealized = 0.0
+    for ap in state.get("assetPositions") or []:
+        p = ap.get("position") or {}
+        szi = float(p.get("szi") or 0)
+        if szi == 0:
+            continue
+        pnl = float(p.get("unrealizedPnl") or 0)
+        unrealized += pnl
+        liq_raw = p.get("liquidationPx")
+        entry = float(p.get("entryPx") or 0)
+        distance = None
+        if liq_raw and entry:
+            liq = float(liq_raw)
+            distance = abs(liq - float(p.get("markPx") or entry)) / float(p.get("markPx") or entry) * 100
+        positions.append({
+            "coin": p.get("coin"),
+            "side": "long" if szi > 0 else "short",
+            "size": abs(szi),
+            "size_usd": abs(float(p.get("positionValue") or 0)),
+            "entry": entry,
+            "mark": float(p.get("markPx") or 0),
+            "liq": float(liq_raw) if liq_raw else None,
+            "liq_distance_pct": round(distance, 2) if distance is not None else None,
+            "unrealized_pnl": round(pnl, 2),
+            "roe_pct": round(float(p.get("returnOnEquity") or 0) * 100, 2),
+            "leverage": (p.get("leverage") or {}).get("value"),
+        })
+    positions.sort(key=lambda x: x["size_usd"], reverse=True)
+
+    # Статистика по закрытым сделкам
+    closed = []
+    for f in fills or []:
+        try:
+            pnl = float(f.get("closedPnl") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pnl == 0:
+            continue
+        closed.append({"coin": f.get("coin"), "pnl": pnl, "time": f.get("time") or 0})
+    wins = sum(1 for t in closed if t["pnl"] > 0)
+    realized = sum(t["pnl"] for t in closed)
+    best = max(closed, key=lambda t: t["pnl"], default=None)
+    worst = min(closed, key=lambda t: t["pnl"], default=None)
+
+    # Последние сделки (все типы, не только закрытия)
+    recent_raw = sorted(fills or [], key=lambda f: f.get("time") or 0, reverse=True)[:12]
+    recent = []
+    for f in recent_raw:
+        recent.append({
+            "coin": f.get("coin"),
+            "dir": f.get("dir"),
+            "side": f.get("side"),
+            "px": float(f.get("px") or 0),
+            "sz": float(f.get("sz") or 0),
+            "closed_pnl": round(float(f.get("closedPnl") or 0), 2),
+            "time": f.get("time"),
+        })
+
+    data_out = {
+        "address": address,
+        "account_value": round(account_value, 2),
+        "withdrawable": round(withdrawable, 2),
+        "margin_used": round(margin_used, 2),
+        "notional_position": round(ntl_pos, 2),
+        "unrealized_pnl": round(unrealized, 2),
+        "positions": positions,
+        "stats": {
+            "closed_trades": len(closed),
+            "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
+            "realized_pnl": round(realized, 2),
+            "best_trade": {"coin": best["coin"], "pnl": round(best["pnl"], 2)} if best else None,
+            "worst_trade": {"coin": worst["coin"], "pnl": round(worst["pnl"], 2)} if worst else None,
+        },
+        "recent_trades": recent,
+        "updated": int(now),
+    }
+    WALLET_CACHE[key] = {"data": data_out, "ts": now}
+    return data_out
+
+# ===== API: Funding Rates (Hyperliquid) =====
+FUNDING_CACHE: dict = {"data": None, "ts": 0.0}
+FUNDING_TTL = 60  # секунд
+
+@app.get("/api/funding")
+async def api_funding():
+    """Ставки фандинга Hyperliquid по всем монетам (за 1 час + годовые %)."""
+    now = _time.time()
+    if FUNDING_CACHE["data"] and now - FUNDING_CACHE["ts"] < FUNDING_TTL:
+        return FUNDING_CACHE["data"]
+
+    try:
+        data = _hl_info({"type": "predictedFundings"})
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+
+    # Формат ответа: [ [coin, [ [exchange, {fundingRate, ...}], ... ]], ... ]
+    out = []
+    for entry in data or []:
+        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+            continue
+        coin = entry[0]
+        for pair in entry[1] or []:
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            exchange, info = pair[0], pair[1] or {}
+            if exchange != "HlPerp":  # ставки именно Hyperliquid
+                continue
+            try:
+                rate = float(info.get("fundingRate") or 0)  # за интервал
+                interval = float(info.get("fundingIntervalHours") or 1)
+            except (TypeError, ValueError):
+                continue
+            per_hour = rate / interval  # приводим к ставке за 1 час
+            out.append({
+                "coin": coin,
+                "rate_1h": round(per_hour * 100, 4),        # % в час
+                "rate_24h": round(per_hour * 24 * 100, 3),   # % в сутки
+                "apr": round(per_hour * 24 * 365 * 100, 1),  # % годовых
+            })
+            break
+    out.sort(key=lambda x: x["rate_1h"], reverse=True)
+    data_out = {"updated": int(now), "funding": out[:40]}
+    FUNDING_CACHE["data"] = data_out
+    FUNDING_CACHE["ts"] = now
     return data_out
 
 # ===== API: привязка Telegram =====

@@ -166,15 +166,15 @@ def _try_link(chat_id, username, code):
     row = conn.execute("SELECT * FROM links WHERE code=?", (code,)).fetchone()
     if not row:
         conn.close()
-        send_message(chat_id, "❌ Код не найден. Сгенерируй новый на сайте.")
+        send_message(chat_id, "❌ Code not found. Generate a new one on the website.")
         return
     if row["status"] == "linked":
         conn.close()
-        send_message(chat_id, "ℹ️ Этот код уже использован. Сгенерируй новый на сайте.")
+        send_message(chat_id, "ℹ️ This code was already used. Generate a new one on the website.")
         return
     if time.time() - row["created_at"] > CODE_TTL:
         conn.close()
-        send_message(chat_id, "⌛ Код истёк (живёт 15 минут). Сгенерируй новый на сайте.")
+        send_message(chat_id, "⌛ Code expired (codes live for 15 minutes). Generate a new one on the website.")
         return
 
     expires = time.time() + TRIAL_DAYS * 86400
@@ -189,55 +189,80 @@ def _try_link(chat_id, username, code):
     )
     conn.commit()
     conn.close()
-    until = time.strftime("%d.%m.%Y", time.localtime(expires))
+    until = time.strftime("%b %d, %Y", time.gmtime(expires))
     send_message(
         chat_id,
-        f"✅ *Telegram привязан к RustDeck!*\n\n"
-        f"🎁 Пробный период: *{TRIAL_DAYS} дней* (до {until})\n\n"
-        f"Скоро здесь появятся уведомления о сделках, SL/TP и дневные сводки.\n"
-        f"Команды: /status — подписка, /prices — живые цены, /help — все команды.",
+        f"✅ *Telegram linked to RustDeck!*\n\n"
+        f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
+        f"Trade alerts, SL/TP notifications and daily summaries are coming soon.\n"
+        f"Commands: /status — subscription, /prices — live prices, /help — all commands.",
     )
 
 
+def _get_json(url, timeout=8):
+    """Простой GET JSON (для внешних API)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "rustdeck-bot/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def _cmd_prices(chat_id):
-    """Живые цены топ-5 монет (CoinGecko — один запрос, есть и HYPE)."""
+    """Live top-5 coin prices: Binance (BTC/ETH/SOL/BNB) + Hyperliquid (HYPE).
+    CoinGecko is NOT used here: it often blocks datacenter IPs (Render)."""
+    prices = {}
+    try:
+        data = _get_json(
+            "https://api.binance.com/api/v3/ticker/24hr"
+            "?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22%5D",
+            timeout=8,
+        )
+        for t in data:
+            prices[t["symbol"].replace("USDT", "")] = {
+                "price": float(t["lastPrice"]),
+                "change": float(t["priceChangePercent"]),
+            }
+    except Exception:
+        pass
+
     try:
         req = urllib.request.Request(
-            "https://api.coingecko.com/api/v3/simple/price"
-            "?ids=bitcoin,ethereum,solana,hyperliquid,binancecoin"
-            "&vs_currencies=usd&include_24hr_change=true",
-            headers={"User-Agent": "rustdeck-bot /1.0"},
+            "https://api-ui.hyperliquid.xyz/info",
+            data=json.dumps({"type": "allMids"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            mids = json.loads(resp.read().decode("utf-8"))
+        mid = float(mids.get("@107") or 0)
+        if mid > 0:
+            prices["HYPE"] = {"price": mid, "change": None}
     except Exception:
-        send_message(chat_id, "⚠️ Не удалось получить цены. Попробуй позже.")
+        pass
+
+    if not prices:
+        send_message(chat_id, "⚠️ Price feed is temporarily unavailable. Try again in a minute.")
         return
 
-    coins = [
-        ("bitcoin", "BTC"), ("ethereum", "ETH"), ("solana", "SOL"),
-        ("hyperliquid", "HYPE"), ("binancecoin", "BNB"),
-    ]
+    order = ["BTC", "ETH", "SOL", "HYPE", "BNB"]
     lines = ["⚡ *RustDeck — Live Prices*\n"]
-    for cg_id, sym in coins:
-        d = data.get(cg_id)
-        if not d or not d.get("usd"):
+    for sym in order:
+        p = prices.get(sym)
+        if not p:
             continue
-        price = d["usd"]
-        change = d.get("usd_24h_change")
-        if change is None:
-            ch = ""
-        else:
-            arrow = "🟢 +" if change >= 0 else "🔴 "
-            ch = f"  {arrow}{change:.2f}%"
+        price = p["price"]
         if price >= 100:
             ps = f"${price:,.2f}"
         elif price >= 1:
             ps = f"${price:.3f}"
         else:
             ps = f"${price:.4f}"
+        change = p["change"]
+        if change is None:
+            ch = ""
+        else:
+            arrow = "🟢 +" if change >= 0 else "🔴 "
+            ch = f"  {arrow}{change:.2f}%"
         lines.append(f"*{sym}* {ps}{ch}")
-    lines.append("\ncalc.rustdeck.app — рассчитай сделку 🎯")
+    lines.append("\nrustdeck.app — wallet stats & market tools 🎯")
     send_message(chat_id, "\n".join(lines))
 
 
@@ -250,23 +275,23 @@ def _cmd_status(chat_id):
     if not sub:
         send_message(
             chat_id,
-            "📭 Telegram пока не привязан к сайту.\n"
-            "Открой calc.rustdeck.app → «Connect Telegram» в сайдбаре.",
+            "📭 Your Telegram is not linked yet.\n"
+            "Open rustdeck.app → “Connect Telegram” in the sidebar.",
         )
         return
     left_days = (sub["expires_at"] - time.time()) / 86400 if sub["expires_at"] else 0
     if left_days > 0:
         send_message(
             chat_id,
-            f"💎 Подписка: *{sub['tier']}*\n"
-            f"Осталось: *{max(0, int(left_days)) + 1} дн.*\n\n"
-            f"Больше функций: calc.rustdeck.app",
+            f"💎 Plan: *{sub['tier']}*\n"
+            f"Days left: *{max(0, int(left_days)) + 1}*\n\n"
+            f"More tools: rustdeck.app",
         )
     else:
         send_message(
             chat_id,
-            "⌛ Пробный период закончился.\n"
-            "Оплата скоро появится — пока всё работает бесплатно 🎁",
+            "⌛ Your free trial has ended.\n"
+            "Paid plans are coming soon — for now everything stays free 🎁",
         )
 
 
@@ -286,13 +311,13 @@ def handle_update(update):
         else:
             send_message(
                 chat_id,
-                "⚡ *RustDeck* — trading tools для крипто-трейдеров\n\n"
-                "Калькулятор риска: calc.rustdeck.app\n\n"
-                "Чтобы привязать Telegram: открой сайт → «Connect Telegram» → "
-                "отправь мне код.\nИли жми кнопку ниже 👇",
+                "⚡ *RustDeck* — trading tools for crypto traders\n\n"
+                "Wallet stats & market tools: rustdeck.app\n\n"
+                "To link your Telegram: open the website → “Connect Telegram” → "
+                "send me the code.\nOr tap the button below 👇",
                 reply_markup={
                     "inline_keyboard": [[
-                        {"text": "🧮 Открыть калькулятор", "url": "https://calc.rustdeck.app"}
+                        {"text": "🎯 Open RustDeck", "url": "https://rustdeck.app"}
                     ]]
                 },
             )
@@ -304,8 +329,8 @@ def handle_update(update):
         else:
             send_message(
                 chat_id,
-                "Формат: `/link 123456`\n"
-                "Код сгенерируй на сайте: calc.rustdeck.app → «Connect Telegram».",
+                "Format: `/link 123456`\n"
+                "Generate the code on the website: rustdeck.app → “Connect Telegram”.",
             )
     elif text == "/prices":
         _cmd_prices(chat_id)
@@ -314,15 +339,15 @@ def handle_update(update):
     elif text == "/help":
         send_message(
             chat_id,
-            "*RustDeck — команды:*\n"
-            "/prices — живые цены топ-5 монет\n"
-            "/status — статус подписки\n"
-            "/link <код> — привязать Telegram\n"
-            "/start — начать заново\n\n"
-            "🧮 Калькулятор: calc.rustdeck.app",
+            "*RustDeck — commands:*\n"
+            "/prices — live prices of top-5 coins\n"
+            "/status — subscription status\n"
+            "/link <code> — link your Telegram\n"
+            "/start — start over\n\n"
+            "🎯 Website: rustdeck.app",
         )
     else:
-        send_message(chat_id, "Не понял 🤔 Список команд: /help")
+        send_message(chat_id, "I didn't get that 🤔 See /help for commands")
 
 
 # ============================================================
