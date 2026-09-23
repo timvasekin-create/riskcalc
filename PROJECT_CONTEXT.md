@@ -46,8 +46,12 @@ riskcalc/
 - Живой тикер и живые цены: /api/prices (Binance + Hyperliquid, кэш 30с, все 12 монет)
 - Живая привязка цен: Entry Price автозаполняется ценой выбранного актива
 - Telegram-бот @RustDeckcryptobot: /start, /link <код>, /prices (Binance+HL, БЕЗ CoinGecko —
-  он блокирует датацентр-IP), /status, /help. Все сообщения на английском.
-  Привязка сайт↔бот через 6-значный код (15 мин), trial 7 дней, SQLite (эфемерная на Render!)
+  он блокирует датацентр-IP), /watch 0x… (СЛЕЖЕНИЕ ЗА КОШЕЛЬКОМ 24/7: фоновый поток
+  опрашивает HL раз в 60с, шлёт в TG: открытие/закрытие позиции, ликвидация, любые филлы),
+  /watching, /unwatch, /status, /help. Все сообщения на английском.
+  Привязка сайт↔бот через 6-значный код (15 мин). БД SQLite (эфемерная на Render!):
+  subscribers (tier trial 7 дней — ОДИН триал на аккаунт, повторные линки НЕ продлевают,
+  watched_wallet). Watcher работает с ЛЮБЫМ кошельком HL, доступ по подписке.
 - ГЛАВНАЯ rustdeck.app (app/index.html) — рабочее приложение, НЕ лендинг:
   * WALLET TRACKER (главная фича): вводишь любой HL-адрес → account value, unrealized/realized
     PnL, win rate, открытые позиции (liq distance!), последние 12 сделок. Бэкенд

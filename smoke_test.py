@@ -168,6 +168,27 @@ try:
         conn.close()
         assert abs(sub2["expires_at"] - sub1["expires_at"]) < 0.001, "trial ПРОДЛИЛСЯ — так нельзя!"
         log(f"TRIAL OK: expires_at не изменился при повторной привязке")
+
+        # /watch: привязка кошелька к подписке + /unwatch
+        _bot._cmd_watch(777000, 'tester', '/watch 0x000000000000000000000000000000000000dEaD')
+        conn = _bot._db()
+        w1 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w1["watched_wallet"] == "0x000000000000000000000000000000000000dEaD", "/watch не сохранил кошелёк"
+        _bot._cmd_unwatch(777000)
+        conn = _bot._db()
+        w2 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w2["watched_wallet"] is None, "/unwatch не очистил кошелёк"
+        log("WATCH OK: /watch сохраняет кошелёк, /unwatch очищает")
+
+        # /watch с кривым адресом — не сохраняет
+        _bot._cmd_watch(777000, 'tester', '/watch notanaddress')
+        conn = _bot._db()
+        w3 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert w3["watched_wallet"] is None, "кривой адрес не должен сохраняться"
+        log("WATCH OK: невалидный адрес отклонён")
         conn = _bot._db()
         conn.execute("DELETE FROM subscribers WHERE chat_id=?", (777000,))
         conn.commit()

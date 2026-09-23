@@ -63,6 +63,10 @@ def init_db():
             linked_at  REAL
         );
         """)
+        # Миграция: колонка отслеживаемого кошелька
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()]
+        if "watched_wallet" not in cols:
+            conn.execute("ALTER TABLE subscribers ADD COLUMN watched_wallet TEXT")
         conn.commit()
         conn.close()
 
@@ -158,6 +162,107 @@ def link_code_status(code):
 
 
 # ============================================================
+# Watch engine: слежение за кошельками 24/7 (для /watch)
+# ============================================================
+def _hl_post(payload, timeout=10):
+    req = urllib.request.Request(
+        "https://api-ui.hyperliquid.xyz/info",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _wallet_snapshot(addr):
+    """Снимок состояния кошелька для сравнения: позиции + ключи филлов."""
+    state = _hl_post({"type": "clearinghouseState", "user": addr})
+    fills = _hl_post({"type": "userFills", "user": addr})
+    positions = {}
+    for ap in state.get("assetPositions") or []:
+        p = ap.get("position") or {}
+        szi = float(p.get("szi") or 0)
+        if szi == 0:
+            continue
+        positions[p.get("coin")] = {
+            "side": "Long" if szi > 0 else "Short",
+            "size_usd": abs(float(p.get("positionValue") or 0)),
+            "entry": float(p.get("entryPx") or 0),
+        }
+    fill_keys = set()
+    for f in (fills or [])[:20]:
+        fill_keys.add(
+            f"{f.get('time')}|{f.get('coin')}|{f.get('side')}|{f.get('px')}|{f.get('sz')}"
+        )
+    return {"positions": positions, "fill_keys": fill_keys}
+
+
+def _watch_loop():
+    """Фоновый цикл: раз в 60с опрашивает отслеживаемые кошельки подписчиков."""
+    cache = {}  # addr -> snapshot
+    while True:
+        try:
+            conn = _db()
+            rows = conn.execute(
+                "SELECT chat_id, watched_wallet FROM subscribers WHERE watched_wallet IS NOT NULL"
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                addr = (row["watched_wallet"] or "").strip()
+                if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
+                    continue
+                try:
+                    snap = _wallet_snapshot(addr)
+                except Exception:
+                    continue
+                prev = cache.get(addr)
+                cache[addr] = snap
+                if prev is None:
+                    continue  # первый опрос — фиксируем базу
+
+                events = []
+                try:
+                    fills = _hl_post({"type": "userFills", "user": addr})
+                except Exception:
+                    fills = []
+                for f in sorted(fills or [], key=lambda x: x.get("time") or 0, reverse=True)[:20]:
+                    key = f"{f.get('time')}|{f.get('coin')}|{f.get('side')}|{f.get('px')}|{f.get('sz')}"
+                    if key in prev["fill_keys"]:
+                        continue
+                    try:
+                        pnl = float(f.get("closedPnl") or 0)
+                        px = float(f.get("px") or 0)
+                        sz = float(f.get("sz") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    dir_s = f.get("dir") or f.get("side") or ""
+                    if "iquidat" in dir_s:
+                        events.append(f"💥 *LIQUIDATION:* {f.get('coin')} {dir_s} @ ${px:,.4g} · PnL ${pnl:+,.2f}")
+                    elif pnl != 0:
+                        emoji = "🟢" if pnl > 0 else "🔴"
+                        events.append(f"{emoji} *Position closed:* {f.get('coin')} {dir_s} @ ${px:,.4g} · PnL ${pnl:+,.2f}")
+                    elif "open" in dir_s.lower():
+                        events.append(f"🟢 *Position opened:* {f.get('coin')} {dir_s} @ ${px:,.4g} · size {sz:g}")
+                    else:
+                        events.append(f"🔔 *Fill:* {f.get('coin')} {dir_s} @ ${px:,.4g} · size {sz:g}")
+
+                prev_pos, now_pos = prev["positions"], snap["positions"]
+                for c in now_pos:
+                    if c not in prev_pos and not any("opened" in e for e in events):
+                        p = now_pos[c]
+                        events.append(f"🟢 *Position opened:* {c} {p['side']} · ${p['size_usd']:,.0f} @ ${p['entry']:,.4g}")
+                for c in prev_pos:
+                    if c not in now_pos and not any("closed" in e or "LIQUIDATION" in e for e in events):
+                        events.append(f"🔒 *Position closed:* {c}")
+
+                for ev in events:
+                    send_message(row["chat_id"], ev)
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+# ============================================================
 # Команды бота
 # ============================================================
 def _try_link(chat_id, username, code):
@@ -195,8 +300,9 @@ def _try_link(chat_id, username, code):
         message = (
             f"✅ *Telegram linked to RustDeck!*\n\n"
             f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
-            f"Trade alerts, SL/TP notifications and daily summaries are coming soon.\n"
-            f"Commands: /status — subscription, /prices — live prices, /help — all commands."
+            f"👀 Watch any wallet 24/7: send /watch 0x…\n"
+            f"(paste the FULL Hyperliquid address — works with any wallet)\n\n"
+            f"Commands: /prices — live prices, /status — subscription, /help — all."
         )
     else:
         left_days = (existing["expires_at"] - time.time()) / 86400 if existing["expires_at"] else 0
@@ -309,6 +415,64 @@ def _cmd_prices(chat_id):
     send_message(chat_id, "\n".join(lines))
 
 
+def _cmd_watch(chat_id, username, text):
+    parts = text.split(maxsplit=1)
+    addr = parts[1].strip() if len(parts) > 1 else ""
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
+        send_message(
+            chat_id,
+            "Usage: `/watch 0x4f2a…c3a9`\n\n"
+            "Paste the *full Hyperliquid wallet address* (0x + 40 characters).\n"
+            "Works with *any* wallet — yours or any whale's.\n\n"
+            "Included with your subscription (free trial: 7 days).",
+        )
+        return
+
+    conn = _db()
+    sub = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+    if not sub:
+        conn.close()
+        send_message(
+            chat_id,
+            "First link your account: open rustdeck.app → “Connect Telegram” → send me the code.",
+        )
+        return
+    conn.execute("UPDATE subscribers SET watched_wallet=? WHERE chat_id=?", (addr, chat_id))
+    conn.commit()
+    conn.close()
+    short = f"{addr[:10]}…{addr[-6:]}"
+    send_message(
+        chat_id,
+        f"👀 *Now watching* `{short}`\n\n"
+        f"You'll get a message here when the wallet:\n"
+        f"• opens or closes a position\n"
+        f"• gets liquidated\n"
+        f"• executes any fill (limits, TP/SL)\n\n"
+        f"Checks every minute, 24/7.\nStop: /unwatch",
+    )
+
+
+def _cmd_unwatch(chat_id):
+    conn = _db()
+    conn.execute("UPDATE subscribers SET watched_wallet=NULL WHERE chat_id=?", (chat_id,))
+    conn.commit()
+    conn.close()
+    send_message(chat_id, "✅ Stopped watching. /watch 0x… to start again.")
+
+
+def _cmd_watching(chat_id):
+    conn = _db()
+    sub = conn.execute(
+        "SELECT watched_wallet FROM subscribers WHERE chat_id=?", (chat_id,)
+    ).fetchone()
+    conn.close()
+    if sub and sub["watched_wallet"]:
+        a = sub["watched_wallet"]
+        send_message(chat_id, f"👀 Watching `{a[:10]}…{a[-6:]}`\nStop: /unwatch")
+    else:
+        send_message(chat_id, "Not watching anything yet. /watch 0x… to start.")
+
+
 def _cmd_status(chat_id):
     conn = _db()
     sub = conn.execute(
@@ -377,6 +541,12 @@ def handle_update(update):
             )
     elif text == "/prices":
         _cmd_prices(chat_id)
+    elif text.startswith("/watch") and not text.startswith("/watching"):
+        _cmd_watch(chat_id, username, text)
+    elif text == "/unwatch":
+        _cmd_unwatch(chat_id)
+    elif text == "/watching":
+        _cmd_watching(chat_id)
     elif text == "/status":
         _cmd_status(chat_id)
     elif text == "/help":
@@ -384,6 +554,10 @@ def handle_update(update):
             chat_id,
             "*RustDeck — commands:*\n"
             "/prices — live prices of top-5 coins\n"
+            "/watch 0x… — watch any Hyperliquid wallet 24/7\n"
+            "  (paste the FULL wallet address; works with any wallet)\n"
+            "/watching — what wallet is being watched\n"
+            "/unwatch — stop watching\n"
             "/status — subscription status\n"
             "/link <code> — link your Telegram\n"
             "/start — start over\n\n"
@@ -417,5 +591,6 @@ def start_bot_thread():
         return False
     init_db()
     threading.Thread(target=_poll_loop, daemon=True, name="rustdeck-tg-bot").start()
+    threading.Thread(target=_watch_loop, daemon=True, name="rustdeck-tg-watch").start()
     return True
 

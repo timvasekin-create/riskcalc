@@ -50,6 +50,12 @@
         .wallet-chip .chip-x { opacity:0.4; cursor:pointer; padding-left:2px; }
         .wallet-chip .chip-x:hover { opacity:1; color:#f6465d; }
         .alert-feed-item { background:#0a0e13; border:1px solid #1e252e; border-radius:6px; padding:6px 10px; }
+        #toastStack { position:fixed; top:16px; right:16px; z-index:100; display:flex; flex-direction:column; gap:8px; max-width:340px; }
+        .toast { background:#151a20; border:1px solid #2a323d; border-left:3px solid #50d2c1; border-radius:10px; padding:10px 14px; box-shadow:0 8px 30px rgba(0,0,0,0.6); animation:toastIn 0.25s ease-out; font-size:12px; }
+        .toast.bad { border-left-color:#f6465d; }
+        .toast b { color:#ffffff; }
+        .toast span { color:#8b96a3; }
+        @keyframes toastIn { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:none; } }
         section { scroll-margin-top:20px; }
     </style>
 </head>
@@ -152,8 +158,8 @@
                             <div id="stTrades" class="text-[10px] text-hyper-muted mt-0.5">0 closed trades</div>
                         </div>
                         <div class="stat-card">
-                            <div class="flex items-center justify-between mb-1 gap-2">
-                                <div class="text-[10px] text-hyper-muted uppercase tracking-wider">Realized PnL</div>
+                            <div class="flex items-center justify-between flex-wrap gap-1 mb-1">
+                                <div class="text-[10px] text-hyper-muted uppercase tracking-wider whitespace-nowrap">Realized PnL</div>
                                 <div class="flex gap-0.5" id="pnlToggles">
                                     <button type="button" data-period="24h" class="pnlp-btn active">24H</button>
                                     <button type="button" data-period="7d" class="pnlp-btn">7D</button>
@@ -162,7 +168,7 @@
                                 </div>
                             </div>
                             <div id="stPnl" class="text-xl font-bold font-mono">$0.00</div>
-                            <div id="stBest" class="text-[10px] text-hyper-muted mt-0.5">Best trade: —</div>
+                            <div id="stBest" class="text-[10px] text-hyper-muted mt-0.5 truncate">Best trade: —</div>
                         </div>
                     </div>
 
@@ -254,8 +260,8 @@
             <div class="bg-hyper-panel border border-hyper-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-4">
                 <div class="text-3xl">✈️</div>
                 <div class="flex-1 text-center md:text-left">
-                    <div class="text-sm font-bold text-white mb-1">Get market data in Telegram</div>
-                    <div class="text-[12px] text-hyper-muted2">Live prices, trade alerts and daily summaries. Link your account in one code — <span class="text-hyper-teal font-semibold">7 days free</span>.</div>
+                    <div class="text-sm font-bold text-white mb-1">Watch any wallet in Telegram — 24/7</div>
+                    <div class="text-[12px] text-hyper-muted2">Send <span class="font-mono text-hyper-teal">/watch 0x…</span> with any Hyperliquid address — the bot pings you on opens, closes, liquidations and fills. <span class="text-hyper-teal font-semibold">7 days free</span>.</div>
                 </div>
                 <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 px-8 rounded-lg transition-all text-[12px] uppercase tracking-wider whitespace-nowrap">
                     Open @RustDeckcryptobot
@@ -504,6 +510,22 @@
         loadMarkets(); setInterval(loadMarkets, 30000);
         loadFunding(); setInterval(loadFunding, 60000);
     </script>
+    <!-- Тосты уведомлений -->
+    <div id="toastStack"></div>
+
+    <script>
+        // ===== TOAST-уведомления (всегда видны на странице, не зависят от ОС) =====
+        function showToast(title, text, bad) {
+            const stack = $('toastStack');
+            if (!stack) return;
+            const div = document.createElement('div');
+            div.className = 'toast' + (bad ? ' bad' : '');
+            div.innerHTML = `<b>${esc(title)}</b><br><span>${esc(text)}</span>`;
+            stack.appendChild(div);
+            while (stack.children.length > 4) stack.removeChild(stack.firstChild);
+            setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity 0.4s'; setTimeout(() => div.remove(), 400); }, 6000);
+        }
+    </script>
     <script>
         // ===== ЛОКАЛЬНЫЙ ПРОФИЛЬ (всё хранится в этом браузере) =====
         const PKEY = 'rustdeck_profile_v1';
@@ -651,7 +673,9 @@
             const allowed = { open: a.onOpen, close: a.onClose, close_profit: a.onClose, close_loss: a.onClose, liq: a.onLiq, fill: a.onFill, info: true };
             if (!force && !allowed[ev.type]) return;
             addFeedItem(ev);
-            if (a.sound) beep(ev.type === 'liq' || ev.type === 'close_loss');
+            const bad = ev.type === 'liq' || ev.type === 'close_loss';
+            showToast(ev.title, ev.text, bad); // всплывашка на странице — видна всегда
+            if (a.sound) beep(bad);
             if ('Notification' in window && Notification.permission === 'granted') {
                 try { new Notification('RustDeck — ' + ev.title, { body: ev.text }); } catch(e) {}
             }
