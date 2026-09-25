@@ -96,7 +96,7 @@ try:
         hub = r.read().decode("utf-8", "replace")
     for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable",
                  "fundingHigh", "profileArea", "alertsToggle", "exportCsvBtn", "ordersTable",
-                 "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "</html>"]:
+                 "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "refreshWalletBtn", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
     log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")

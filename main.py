@@ -266,7 +266,7 @@ async def api_prices():
 import re as _re
 
 WALLET_CACHE: dict = {}
-WALLET_TTL = 30  # секунд
+WALLET_TTL = 5   # секунд — быстрые уведомления на вкладке (5с опрос фронта)
 
 def _pnl_since(closed_trades: list, since_ms: float) -> float:
     """Суммарный реализованный PnL сделок, закрытых после since_ms."""

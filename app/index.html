@@ -224,7 +224,10 @@
                     </div>
                     <div id="noTrades" class="hidden text-[12px] text-hyper-muted mt-2">No trade history.</div>
 
-                    <div class="mt-4 text-[10px] text-hyper-muted font-mono" id="walletUpdated"></div>
+                    <div class="mt-4 text-[10px] text-hyper-muted font-mono flex items-center justify-between" id="walletUpdated">
+                        <span></span>
+                        <button type="button" id="refreshWalletBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Refresh wallet data">⟳ Refresh</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -501,9 +504,18 @@
             }).join('');
             $('noTrades').classList.toggle('hidden', !!(d.recent_trades || []).length);
 
-            $('walletUpdated').textContent = 'Data from Hyperliquid · updated ' + new Date(d.updated * 1000).toLocaleTimeString('en-US');
+            $('walletUpdated').querySelector('span').textContent =
+                'Data from Hyperliquid · updated ' + new Date(d.updated * 1000).toLocaleTimeString('en-US');
             $('walletResult').classList.remove('hidden');
         }
+
+        // Кнопка обновления портфеля
+        $('refreshWalletBtn').addEventListener('click', () => {
+            if (!currentWalletAddr) return;
+            trackWallet();
+            // фоновый watch тоже перезапускаем — сбрасываем базу сравнения
+            if (getAlerts().enabled) startWatching();
+        });
 
         // ===== Тумблер периода PnL (24h / 7d / 30d / All-time) =====
         let currentPeriod = 'all';
@@ -894,7 +906,7 @@
                 } catch(e) {}
             };
             poll(); // первый опрос — база для сравнения, уведомлений не будет
-            watchTimer = setInterval(poll, 25000);
+            watchTimer = setInterval(poll, 5000);
         }
 
         function stopWatching() {
