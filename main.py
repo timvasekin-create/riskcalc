@@ -294,6 +294,7 @@ async def api_wallet(address: str):
         fills = _hl_info({"type": "userFills", "user": address})
         orders = _hl_info({"type": "frontendOpenOrders", "user": address})
         spot = _hl_info({"type": "spotClearinghouseState", "user": address})
+        portfolio = _hl_info({"type": "portfolio", "user": address})
     except Exception:
         return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
 
@@ -428,6 +429,48 @@ async def api_wallet(address: str):
             })
     spot_tokens.sort(key=lambda x: x["usd"], reverse=True)
 
+    # PnL по периодам — НАПРЯМУЮ с API (portfolio, cumulative pnlHistory),
+    # как в эксплорере HL. Фолбэк — сумма по филлам.
+    pnl_periods = {}
+    try:
+        windows = {}
+        for entry in portfolio or []:
+            # Формат HL: [["day", {...}], ["week", {...}], ...] — но страхуемся от dict
+            if isinstance(entry, dict):
+                items = entry.items()
+            elif isinstance(entry, (list, tuple)) and len(entry) >= 2 and isinstance(entry[1], dict):
+                items = [(entry[0], entry[1])]
+            else:
+                continue
+            for k, v in items:
+                if isinstance(v, dict):
+                    windows[k] = v.get("pnlHistory")
+
+        def _period_pnl(hist):
+            # pnlHistory — кумулятивный PnL: период = последний минус первый
+            if not hist or len(hist) < 2:
+                return None
+            try:
+                return round(float(hist[-1][1]) - float(hist[0][1]), 2)
+            except (TypeError, ValueError, IndexError):
+                return None
+
+        pnl_periods = {
+            "24h": _period_pnl(windows.get("day")),
+            "7d": _period_pnl(windows.get("week")),
+            "30d": _period_pnl(windows.get("month")),
+            "all": _period_pnl(windows.get("allTime")),
+        }
+    except Exception:
+        pass
+    if pnl_periods.get("24h") is None:
+        pnl_periods = {
+            "24h": _pnl_since(closed, now * 1000 - 24 * 3600 * 1000),
+            "7d": _pnl_since(closed, now * 1000 - 7 * 24 * 3600 * 1000),
+            "30d": _pnl_since(closed, now * 1000 - 30 * 24 * 3600 * 1000),
+            "all": round(realized, 2),
+        }
+
     data_out = {
         "address": address,
         "account_value": round(account_value, 2),
@@ -448,13 +491,8 @@ async def api_wallet(address: str):
             "worst_trade": {"coin": worst["coin"], "pnl": round(worst["pnl"], 2)} if worst else None,
         },
         "recent_trades": recent,
-        # Реализованный PnL по периодам (для тумблеров 24h/7d/30d/All)
-        "pnl_periods": {
-            "24h": _pnl_since(closed, now * 1000 - 24 * 3600 * 1000),
-            "7d": _pnl_since(closed, now * 1000 - 7 * 24 * 3600 * 1000),
-            "30d": _pnl_since(closed, now * 1000 - 30 * 24 * 3600 * 1000),
-            "all": round(realized, 2),
-        },
+        # PnL по периодам: приоритет — API portfolio, фолбэк — сумма по филлам
+        "pnl_periods": pnl_periods,
         "updated": int(now),
     }
     WALLET_CACHE[key] = {"data": data_out, "ts": now}
