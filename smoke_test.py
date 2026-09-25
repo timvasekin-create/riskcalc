@@ -96,7 +96,7 @@ try:
         hub = r.read().decode("utf-8", "replace")
     for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable",
                  "fundingHigh", "profileArea", "alertsToggle", "exportCsvBtn", "ordersTable",
-                 "walletChips", "detectEvents", "</html>"]:
+                 "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
     log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
@@ -152,6 +152,29 @@ try:
         log(f"FILLS API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:
         log("FILLS API WARN:", repr(e))
+
+    # Leaderboard API (файл ~10MB, может грузиться до пары минут)
+    try:
+        status, body = get("/api/leaderboard", timeout=150)
+        lb = json.loads(body)
+        log(f"LEADERBOARD API: {status}, day={len(lb.get('day', []))}, week={len(lb.get('week', []))}, all={len(lb.get('all', []))}")
+        top = (lb.get("all") or [{}])[0]
+        if top:
+            log(f"  #1 all-time: {top.get('name') or top.get('address','')[:12]}… pnl=${top.get('pnl'):,}")
+    except Exception as e:
+        log("LEADERBOARD WARN:", repr(e))
+
+    # Whale Feed API
+    try:
+        status, body = get("/api/whales", timeout=150)
+        wh = json.loads(body)
+        evs = wh.get("events", [])
+        log(f"WHALES API: {status}, {len(evs)} событий за 24ч (порог ${wh.get('min_usd'):,})")
+        if evs:
+            e0 = evs[0]
+            log(f"  свежайшее: {e0.get('coin')} {e0.get('dir')} @ ${e0.get('notional'):,}")
+    except Exception as e:
+        log("WHALES WARN:", repr(e))
 
     # Логика триала: одна акция на аккаунт, повторная привязка НЕ продлевает
     try:

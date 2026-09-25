@@ -331,6 +331,52 @@ def _get_json(url, timeout=8):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _cmd_top(chat_id):
+    """Топ-5 трейдеров дня из официального лидерборда Hyperliquid."""
+    try:
+        req = urllib.request.Request(
+            "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard",
+            headers={"User-Agent": "rustdeck-bot/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        send_message(chat_id, "⚠️ Leaderboard is temporarily unavailable. Try again later.")
+        return
+
+    rows = data.get("leaderboardRows") or []
+    traders = []
+    for r in rows:
+        try:
+            val = float(r.get("accountValue") or 0)
+        except (TypeError, ValueError):
+            continue
+        if val < 10_000:
+            continue
+        for pair in r.get("windowPerformances") or []:
+            if isinstance(pair, (list, tuple)) and pair[0] == "day" and isinstance(pair[1], dict):
+                try:
+                    pnl = float(pair[1].get("pnl") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if pnl > 0:
+                    traders.append((pnl, r.get("ethAddress") or "", r.get("displayName") or ""))
+                break
+    traders.sort(reverse=True)
+    top = traders[:5]
+    if not top:
+        send_message(chat_id, "⚠️ No data yet. Try again later.")
+        return
+
+    lines = ["🏆 *Top-5 Traders Today (Hyperliquid)*\n"]
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    for i, (pnl, addr, name) in enumerate(top):
+        label = name if name else f"{addr[:6]}…{addr[-4:]}"
+        lines.append(f"{medals[i]} `{addr}`\n    {label} · *+${pnl:,.0f}*")
+    lines.append("\nTrack any of them: /watch 0x…\nFull stats: rustdeck.app")
+    send_message(chat_id, "\n".join(lines))
+
+
 def _cmd_prices(chat_id):
     """Live top-5 coin prices: Binance (BTC/ETH/SOL/BNB) + Hyperliquid (HYPE).
     CoinGecko is NOT used here: it often blocks datacenter IPs (Render)."""
@@ -546,6 +592,8 @@ def handle_update(update):
             )
     elif text == "/prices":
         _cmd_prices(chat_id)
+    elif text == "/top":
+        _cmd_top(chat_id)
     elif text.startswith("/watch") and not text.startswith("/watching"):
         _cmd_watch(chat_id, username, text)
     elif text == "/unwatch":
@@ -562,6 +610,7 @@ def handle_update(update):
             chat_id,
             "*RustDeck — commands:*\n"
             "/prices — live prices of top-5 coins\n"
+            "/top — top-5 traders today (PnL)\n"
             "/watch 0x… — watch any Hyperliquid wallet 24/7\n"
             "  (paste the FULL wallet address; works with any wallet)\n"
             "/watching — what wallet is being watched\n"

@@ -50,6 +50,8 @@
         .wallet-chip .chip-x { opacity:0.4; cursor:pointer; padding-left:2px; }
         .wallet-chip .chip-x:hover { opacity:1; color:#f6465d; }
         .alert-feed-item { background:#0a0e13; border:1px solid #1e252e; border-radius:6px; padding:6px 10px; }
+        .whale-row { display:flex; align-items:center; gap:10px; background:#0a0e13; border:1px solid #1e252e; border-radius:8px; padding:8px 12px; font-size:12px; cursor:pointer; transition:border-color 0.15s; flex-wrap:wrap; }
+        .whale-row:hover { border-color:#50d2c1; }
         #toastStack { position:fixed; top:16px; right:16px; z-index:100; display:flex; flex-direction:column; gap:8px; max-width:340px; }
         .toast { background:#151a20; border:1px solid #2a323d; border-left:3px solid #50d2c1; border-radius:10px; padding:10px 14px; box-shadow:0 8px 30px rgba(0,0,0,0.6); animation:toastIn 0.25s ease-out; font-size:12px; }
         .toast.bad { border-left-color:#f6465d; }
@@ -71,8 +73,9 @@
         </div>
         <nav class="hidden md:flex items-center gap-6 text-[12px] font-semibold uppercase tracking-wider text-hyper-muted2">
             <a href="#tracker" class="hover:text-hyper-teal transition-colors">Wallet Tracker</a>
+            <a href="#whales" class="hover:text-hyper-teal transition-colors">Whales</a>
             <a href="#markets" class="hover:text-hyper-teal transition-colors">Markets</a>
-            <a href="#funding" class="hover:text-hyper-teal transition-colors">Funding</a>
+            <a href="#leaderboard" class="hover:text-hyper-teal transition-colors">Leaderboard</a>
             <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="hover:text-hyper-teal transition-colors">Telegram</a>
         </nav>
         <div class="flex items-center gap-3">
@@ -263,6 +266,40 @@
                             <table class="data-table" id="fundingLow"><thead><tr><th>Coin</th><th>1h</th><th>APR</th></tr></thead><tbody><tr><td colspan="3" class="text-center text-hyper-muted py-4">Loading…</td></tr></tbody></table>
                         </div>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== WHALE FEED ===== -->
+        <section id="whales" class="max-w-5xl mx-auto px-4 pb-12">
+            <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 md:p-6">
+                <div class="flex items-center justify-between mb-1">
+                    <h3 class="text-lg font-bold text-white">🐋 Whale Feed <span class="text-hyper-muted2 text-[12px] font-normal">live $250K+ trades</span></h3>
+                    <span class="text-[10px] text-hyper-muted font-mono uppercase tracking-wider">Auto-refresh 60s</span>
+                </div>
+                <p class="text-[11px] text-hyper-muted mb-4">Biggest trades by top Hyperliquid wallets in the last 24h. Click a whale to track its full stats.</p>
+                <div id="whaleList" class="space-y-2">
+                    <div class="text-center text-hyper-muted py-6 text-[12px]">Scanning whales… (first load ~10s)</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== LEADERBOARD ===== -->
+        <section id="leaderboard" class="max-w-5xl mx-auto px-4 pb-12">
+            <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 md:p-6">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <h3 class="text-lg font-bold text-white">🏆 Leaderboard <span class="text-hyper-muted2 text-[12px] font-normal">top PnL traders</span></h3>
+                    <div class="flex gap-1" id="lbToggles">
+                        <button type="button" data-p="day" class="pnlp-btn">24H</button>
+                        <button type="button" data-p="week" class="pnlp-btn">7D</button>
+                        <button type="button" data-p="all" class="pnlp-btn active">All</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto border border-hyper-border rounded-lg">
+                    <table class="data-table" id="lbTable">
+                        <thead><tr><th>#</th><th>Trader</th><th>PnL</th><th>ROI</th><th>Volume</th><th></th></tr></thead>
+                        <tbody><tr><td colspan="6" class="text-center text-hyper-muted py-6">Loading…</td></tr></tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -536,6 +573,95 @@
 
         loadMarkets(); setInterval(loadMarkets, 30000);
         loadFunding(); setInterval(loadFunding, 60000);
+    </script>
+    <script>
+        // ===== WHALE FEED =====
+        function shortAddr(a) { return a.slice(0, 6) + '…' + a.slice(-4); }
+
+        async function loadWhales() {
+            try {
+                const r = await fetch('/api/whales');
+                const j = await r.json();
+                const list = $('whaleList');
+                const evs = j.events || [];
+                if (!evs.length) {
+                    list.innerHTML = '<div class="text-center text-hyper-muted py-6 text-[12px]">No whale trades ≥ $' + fmtCompact(j.min_usd || 250000).replace('$','$') + ' in the last 24h. Check back soon.</div>';
+                    return;
+                }
+                list.innerHTML = evs.map(e => {
+                    const isOpen = /open/i.test(e.dir || '');
+                    const isLiq = /liquidat/i.test(e.dir || '');
+                    const badge = isLiq ? '<span class="pill pill-short">LIQ</span>'
+                        : isOpen ? '<span class="pill pill-long">OPEN</span>'
+                        : (e.pnl !== 0 ? `<span class="pill ${e.pnl > 0 ? 'pill-long' : 'pill-short'}">${e.pnl > 0 ? 'WIN' : 'LOSS'}</span>` : '<span class="pill" style="background:rgba(139,150,163,0.12); color:#8b96a3;">CLOSE</span>');
+                    return `<div class="whale-row" data-addr="${e.address}">
+                        ${badge}
+                        <span class="font-bold text-white">${esc(e.coin)}</span>
+                        <span class="text-hyper-muted2">${esc(e.dir || e.side)}</span>
+                        <span class="font-mono font-bold text-hyper-yellow">@ $${fmtCompact(e.notional)}</span>
+                        <span class="text-hyper-muted font-mono text-[11px]">${shortAddr(e.address)}</span>
+                        <span class="font-mono text-[11px] text-hyper-muted ml-auto">${new Date(e.time).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false})}</span>
+                    </div>`;
+                }).join('');
+            } catch(e) { /* пропускаем обновление */ }
+        }
+
+        $('whaleList').addEventListener('click', e => {
+            const row = e.target.closest('.whale-row');
+            if (!row) return;
+            $('walletAddress').value = row.dataset.addr;
+            trackWallet();
+            document.getElementById('tracker').scrollIntoView({behavior: 'smooth'});
+        });
+
+        // ===== LEADERBOARD =====
+        let lbPeriod = 'all';
+        let lbData = null;
+
+        function renderLb() {
+            const rows = (lbData || {})[lbPeriod] || [];
+            const body = $('lbTable').querySelector('tbody');
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-hyper-muted py-6">No data</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map((t, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<span class="text-hyper-muted">${i + 1}</span>`;
+                return `<tr>
+                    <td>${medal}</td>
+                    <td class="font-mono text-[11px]">${t.name ? esc(t.name) : shortAddr(t.address)}</td>
+                    <td class="font-mono font-bold ${pnlCls(t.pnl)}">${pnlSign(t.pnl)}</td>
+                    <td class="font-mono ${pnlCls(t.roi)}">${t.roi >= 0 ? '+' : ''}${t.roi.toFixed(1)}%</td>
+                    <td class="font-mono text-hyper-muted2">${fmtCompact(t.vlm)}</td>
+                    <td><button type="button" class="text-[10px] px-2 py-0.5 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono lb-track" data-addr="${t.address}">Track</button></td>
+                </tr>`;
+            }).join('');
+        }
+
+        document.querySelectorAll('#lbToggles .pnlp-btn').forEach(b => b.addEventListener('click', () => {
+            lbPeriod = b.dataset.p;
+            document.querySelectorAll('#lbToggles .pnlp-btn').forEach(x => x.classList.toggle('active', x === b));
+            renderLb();
+        }));
+
+        $('lbTable').addEventListener('click', e => {
+            const btn = e.target.closest('.lb-track');
+            if (!btn) return;
+            $('walletAddress').value = btn.dataset.addr;
+            trackWallet();
+            document.getElementById('tracker').scrollIntoView({behavior: 'smooth'});
+        });
+
+        async function loadLeaderboard() {
+            try {
+                const r = await fetch('/api/leaderboard');
+                lbData = await r.json();
+                renderLb();
+            } catch(e) { /* пропускаем обновление */ }
+        }
+
+        loadWhales(); setInterval(loadWhales, 60000);
+        loadLeaderboard(); setInterval(loadLeaderboard, 120000);
     </script>
     <!-- Тосты уведомлений -->
     <div id="toastStack"></div>

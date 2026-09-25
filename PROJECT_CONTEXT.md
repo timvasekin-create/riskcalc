@@ -72,10 +72,21 @@ riskcalc/
     сохранённых кошельков над формой (клик = отследить, ✕ = удалить), кнопка ＋ Save wallet.
   * OPEN ORDERS: таблица лимиток/TP/SL (frontendOpenOrders) в результатах трекера.
   * EXPORT CSV: кнопка у Recent Trades → /api/fills/{address}?limit=500 → скачивание.
+  * WHALE FEED: лента сделок >= $250K у топ-40 китов HL за 24ч (бейджи OPEN/WIN/LOSS/LIQ),
+    клик по строке → трекер этого кошелька. Бэкенд /api/whales: китовый universe из
+    лидерборда (кэш 30 мин), обновление ФОНОВЫМ ПОТОКОМ раз в 60с (40 HL-запросов
+    нельзя делать в веб-запросе), API отвечает мгновенно из кэша (или status=warming).
+  * LEADERBOARD: топ-20 трейдеров по PnL за 24H/7D/All (официальный рейтинг HL,
+    windowPerformances — список кортежей!), кнопка Track → трекер. /api/leaderboard
+    с ретраями (файл ~10MB) и кэшем 5 мин.
+  * Бот /top: топ-5 трейдеров дня с медалями, адреса копируются → /watch.
+  * PnL-периоды (24H/7D/30D/All) — из API portfolio (кумулятивный pnlHistory,
+    последний минус первый) — сверено с эксплорером HL ($23.47 all-time).
+    Фолбэк — сумма по филлам.
 - Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
   calc.rustdeck.app/localhost → калькулятор
 - smoke_test.py — все роуты, host-роутинг, /api/wallet, /api/funding, /api/markets,
-  /api/fills, логика одного-триала
+  /api/fills, /api/leaderboard, /api/whales, логика одного-триала, watch ×5
 
 ## TELEGRAM-БОТ (сделано)
 - @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,

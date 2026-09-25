@@ -146,6 +146,7 @@ import time as _time
 import urllib.request
 import urllib.error
 import json as _json
+import threading as _threading
 
 HL_INFO_URL = "https://api-ui.hyperliquid.xyz/info"
 
@@ -624,6 +625,184 @@ async def api_funding():
     FUNDING_CACHE["data"] = data_out
     FUNDING_CACHE["ts"] = now
     return data_out
+
+# ===== API: Leaderboard (официальный рейтинг Hyperliquid) =====
+LB_CACHE: dict = {"data": None, "ts": 0.0}
+LB_TTL = 300          # кэш 5 минут (файл тяжёлый, ~10MB)
+LB_MIN_VALUE = 1_000  # отсекаем пустые аккаунты
+
+@app.get("/api/leaderboard")
+async def api_leaderboard():
+    """Топ-трейдеры Hyperliquid по PnL за 24h / 7d / allTime (windowPerformances)."""
+    now = _time.time()
+    if LB_CACHE["data"] and now - LB_CACHE["ts"] < LB_TTL:
+        return LB_CACHE["data"]
+
+    try:
+        last_err = None
+        for _ in range(2):  # файл ~10MB, иногда обрывается — ретраим
+            try:
+                req = urllib.request.Request(
+                    "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard",
+                    headers={"User-Agent": "rustdeck/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    data = _json.loads(resp.read().decode("utf-8"))
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(1)
+        if last_err is not None:
+            raise last_err
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+
+    rows = data.get("leaderboardRows") or []
+
+    def _w(r):
+        """windowPerformances -> {period: {pnl, roi, vlm}} (формат — список кортежей)."""
+        out = {}
+        for pair in r.get("windowPerformances") or []:
+            if isinstance(pair, (list, tuple)) and len(pair) >= 2 and isinstance(pair[1], dict):
+                out[pair[0]] = pair[1]
+            elif isinstance(pair, dict) and "day" in pair:
+                pass
+        return out
+
+    def _f(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # day / week / allTime списки
+    variants = {"day": [], "week": [], "all": []}
+    for r in rows:
+        addr = r.get("ethAddress") or r.get("accountAddress")
+        if not addr or _f(r.get("accountValue")) < LB_MIN_VALUE:
+            continue
+        w = _w(r)
+        name = r.get("displayName") or ""
+        for key, period in (("day", "day"), ("week", "week"), ("all", "allTime")):
+            p = w.get(period) or {}
+            pnl = _f(p.get("pnl"))
+            if pnl == 0:
+                continue
+            variants[key].append({
+                "address": addr,
+                "name": name,
+                "pnl": round(pnl, 0),
+                "roi": round(_f(p.get("roi")) * 100, 1),
+                "vlm": round(_f(p.get("vlm")), 0),
+            })
+
+    for key in variants:
+        variants[key].sort(key=lambda x: x["pnl"], reverse=True)
+
+    data_out = {
+        "updated": int(now),
+        "day": variants["day"][:20],
+        "week": variants["week"][:20],
+        "all": variants["all"][:20],
+    }
+    LB_CACHE["data"] = data_out
+    LB_CACHE["ts"] = now
+    return data_out
+
+# ===== API: Whale Feed (крупные сделки топ-кошельков в реальном времени) =====
+WHALE_CACHE: dict = {"data": None, "ts": 0.0}
+WHALE_TTL = 60          # обновление раз в минуту
+WHALE_MIN_USD = 250_000 # порог «китовой» сделки
+WHALE_WATCH = 40        # сколько топ-кошельков сканируем
+
+def _whale_universe():
+    """Топ-кошельки по accountValue (кэш 30 мин, leaderboard тяжёлый)."""
+    uni = getattr(api_leaderboard, "_whale_uni", None) or {"ts": 0.0, "addrs": []}
+    now = _time.time()
+    if uni["addrs"] and now - uni["ts"] < 1800:
+        return uni["addrs"]
+    try:
+        req = urllib.request.Request(
+            "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard",
+            headers={"User-Agent": "rustdeck/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        rows = data.get("leaderboardRows") or []
+
+        def av(r):
+            try:
+                return float(r.get("accountValue") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        top = sorted(
+            (r for r in rows if r.get("ethAddress") and 100_000 <= av(r) < 500_000_000),
+            key=av, reverse=True,
+        )[:WHALE_WATCH]
+        uni = {"ts": now, "addrs": [r["ethAddress"] for r in top]}
+        api_leaderboard._whale_uni = uni
+        return uni["addrs"]
+    except Exception:
+        return uni["addrs"]
+
+@app.get("/api/whales")
+async def api_whales():
+    """Лента крупных сделок (>= $250K) топ-китов за 24ч. Мгновенно из кэша —
+    обновляет фоновый поток (40 HL-запросов нельзя делать в веб-запросе)."""
+    cached = WHALE_CACHE["data"]
+    if cached:
+        return cached
+    return {"updated": int(_time.time()), "min_usd": WHALE_MIN_USD, "status": "warming", "events": []}
+
+
+def _whale_refresh_loop():
+    """Фоновое обновление whale-ленты раз в 60 секунд."""
+    while True:
+        try:
+            addrs = _whale_universe()
+            events = []
+            now_ms = _time.time() * 1000
+            for addr in addrs:
+                try:
+                    fills = _hl_info({"type": "userFills", "user": addr}, timeout=8)
+                except Exception:
+                    continue
+                for f in fills or []:
+                    try:
+                        notional = float(f.get("px") or 0) * float(f.get("sz") or 0)
+                        ftime = f.get("time") or 0
+                    except (TypeError, ValueError):
+                        continue
+                    if notional < WHALE_MIN_USD or now_ms - ftime > 24 * 3600 * 1000:
+                        continue
+                    try:
+                        pnl = float(f.get("closedPnl") or 0)
+                    except (TypeError, ValueError):
+                        pnl = 0.0
+                    events.append({
+                        "address": addr,
+                        "coin": f.get("coin"),
+                        "dir": f.get("dir"),
+                        "side": f.get("side"),
+                        "notional": round(notional, 0),
+                        "px": float(f.get("px") or 0),
+                        "pnl": round(pnl, 2),
+                        "time": ftime,
+                    })
+            events.sort(key=lambda x: x["time"], reverse=True)
+            WHALE_CACHE["data"] = {
+                "updated": int(_time.time()),
+                "min_usd": WHALE_MIN_USD,
+                "events": events[:40],
+            }
+        except Exception:
+            pass
+        time.sleep(60)
+
+# Фоновый поток whale-ленты (стартует вместе с сервером)
+_threading.Thread(target=_whale_refresh_loop, daemon=True, name="rustdeck-whales").start()
 
 # ===== API: привязка Telegram =====
 @app.post("/api/tg/link/start")
