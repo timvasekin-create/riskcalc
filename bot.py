@@ -201,14 +201,22 @@ def _order_dir_label(o, kind, pos_side=""):
     return _side_label(o.get("side"))
 
 
+def _order_amount(o):
+    """Объём ордера: '3.3 LTC ($254.10)' или 'whole position ($37.80)'.
+    У position-level TP/SL Hyperliquid отдаёт sz=0 — показывать «0» нельзя."""
+    coin = o.get("coin") or ""
+    usd = f"(${o['notional']:,.2f})" if o.get("notional") else ""
+    sz = o.get("sz") or 0
+    if sz:
+        return f"{_fmt_small(sz)} {coin} {usd}".strip()
+    return ("whole position " + usd).strip()
+
+
 def _order_line(o):
     """Строка ордера: 'Take Profit — $77 · 3.3 LTC ($254.10)'."""
     kind = o.get("type") or "Order"
-    coin = o.get("coin") or ""
-    amt = o.get("sz") or 0
-    usd = f"(${o['notional']:,.2f})" if o.get("notional") else ""
-    tail = f"{_fmt_small(amt)} {coin} {usd}".strip()
-    return f"{kind} — ${_fmt_small(o.get('px'))}" + (f" · {tail}" if tail else "")
+    amt = _order_amount(o)
+    return f"{kind} — ${_fmt_small(o.get('px'))}" + (f" · {amt}" if amt else "")
 
 
 def _removal_pairs(group):
@@ -235,10 +243,7 @@ def _order_removed_text(main, others=None):
     head = "🗑 *ORDER REMOVED*" + (f" — #{main['oid']}" if main.get("oid") else "")
     lines = [head, f"*{coin} · {side}* {emoji}".strip()]
     lines.append(f"• {main.get('type') or 'Order'}: ${_fmt_small(main.get('px'))}")
-    amt = main.get("sz") or 0
-    usd = f" (${main['notional']:,.2f})" if main.get("notional") else ""
-    if amt:
-        lines.append(f"• Size: {_fmt_small(amt)} {coin}{usd}")
+    lines.append(f"• Size: {_order_amount(main)}")
     if others:
         lines.append("")
         lines.append("*Removed together:*")
@@ -342,8 +347,10 @@ def _wallet_snapshot(addr):
             continue
         positions[p.get("coin")] = {
             "side": "Long" if szi > 0 else "Short",
+            "size": abs(szi),
             "size_usd": abs(float(p.get("positionValue") or 0)),
             "entry": float(p.get("entryPx") or 0),
+            "mark": float(p.get("markPx") or 0),
         }
     fill_keys = set()
     for f in (fills or [])[:20]:
@@ -359,22 +366,22 @@ def _wallet_snapshot(addr):
     orders = {}
     try:
         for o in _hl_post({"type": "frontendOpenOrders", "user": addr}) or []:
+            # Позиция по этой монете: из неё берём направление (dir_label), mark
+            # для классификации и размер, если у position-level TP/SL API отдал sz=0
+            pos = positions.get(o.get("coin")) or {}
+            mark = float(pos.get("mark") or 0)
+            pos_side = pos.get("side") or ""
+            pos_sz = float(pos.get("size") or 0)
             try:
-                price = float(o.get("limitPx") or o.get("triggerPx") or 0)
-                sz = float(o.get("sz") or 0)
+                trigger_px = float(o.get("triggerPx") or 0)
+                limit_px = float(o.get("limitPx") or 0)
+                raw_sz = float(o.get("sz") or 0)
             except (TypeError, ValueError):
                 continue
-            mark = 0.0
-            pos_side = ""
-            for ap in state.get("assetPositions") or []:
-                p = ap.get("position") or {}
-                if p.get("coin") == o.get("coin"):
-                    try:
-                        mark = float(p.get("markPx") or 0)
-                        pos_side = "Long" if float(p.get("szi") or 0) > 0 else "Short"
-                    except (TypeError, ValueError):
-                        mark, pos_side = 0.0, ""
-                    break
+            # для триггерных ордеров показываем цену триггера (её ставил юзер)
+            price = trigger_px if trigger_px > 0 else limit_px
+            sz = raw_sz or pos_sz
+            whole = bool(o.get("isPositionTpsl")) or (raw_sz == 0 and pos_sz > 0)
             kind, is_tp, is_sl = _order_kind(o, mark)
             dir_label = _order_dir_label(o, kind, pos_side)
             key = (str(o.get("oid")) if o.get("oid") is not None
@@ -387,6 +394,7 @@ def _wallet_snapshot(addr):
                 "dir_label": dir_label,
                 "px": price,
                 "sz": sz,
+                "whole_position": whole,
                 "notional": round(sz * price, 2),
                 "type": kind,
                 "is_tp": is_tp,

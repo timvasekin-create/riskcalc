@@ -91,6 +91,13 @@ try:
         assert len(pairs) == 1 and pairs[0][0] is _tp and pairs[0][1] == [_sl], f"группировка TP/SL: {pairs}"
         pairs2 = _bot_fmt._removal_pairs([_main_o, _tp, _sl])
         assert len(pairs2) == 1 and pairs2[0][0] is _main_o and set(x["oid"] for x in pairs2[0][1]) == {87, 88}, f"группировка с лимиткой: {pairs2}"
+        # Объём: у position-level TP/SL Hyperliquid отдаёт sz=0 — нельзя показывать «0»
+        assert _bot_fmt._order_amount({"coin": "ETH", "sz": 0.014, "notional": 37.8}) == "0.014 ETH ($37.80)"
+        assert _bot_fmt._order_amount({"coin": "ETH", "sz": 0, "notional": 37.8}) == "whole position ($37.80)"
+        assert _bot_fmt._order_amount({"coin": "ETH", "sz": 0}) == "whole position"
+        _zero = dict(_tp, sz=0, whole_position=True)
+        _msg_zero = _bot_fmt._order_removed_text(_zero, [])
+        assert "0 ETH" not in _msg_zero and "whole position" in _msg_zero, f"нулевой объём не должен показываться:\n{_msg_zero}"
         log("ORDER ALERT OK: «ордер снят» — Long/Short от позиции + блок Removed together (TP/SL)")
     except AssertionError as e:
         fails += 1
@@ -535,7 +542,8 @@ try:
         # Ордера: для алертов «ордер снят» нужны oid, тип (Take Profit/Stop
         # Loss/Limit), размер и объём в USD — проверяем форму ответа
         for o in w.get("open_orders") or []:
-            for key in ("oid", "type", "notional", "remaining", "is_tp", "is_sl", "side_label"):
+            for key in ("oid", "type", "notional", "remaining", "is_tp", "is_sl", "side_label",
+                        "dir_label", "whole_position"):
                 assert key in o, f"в open_orders нет {key}: {o}"
         log(f"ORDERS SHAPE OK: {len(w.get('open_orders') or [])} ордеров с oid/типом/объёмом в USD")
     except urllib.error.HTTPError as e:

@@ -1939,7 +1939,9 @@
         function orderAmount(o) {
             const sz = o.remaining || o.size || 0;
             const usd = o.notional ? ` ($${fmtUsd(o.notional)})` : '';
-            return sz ? `${fmtPrice(sz)} ${o.coin}${usd}` : '';
+            if (sz) return `${fmtPrice(sz)} ${o.coin}${usd}`;
+            // position-level TP/SL: Hyperliquid отдаёт размер 0 (закрывает всю позицию)
+            return o.whole_position ? ('whole position' + usd) : '';
         }
         function orderDir(o) {
             // Направление ПОЗИЦИИ: у лонга TP/SL продаются (HL: сторона A),
@@ -2031,8 +2033,9 @@
                 if (prevOrd[k]) return;
                 const o = nowOrd[k];
                 const kind = o.type || (o.is_trigger ? 'Trigger' : 'Limit');
-                events.push({ type: 'order', title: '🧾 ' + kind + ' placed',
-                              text: `${o.coin} ${o.dir_label || o.side_label || o.side} · ${fmtPrice(o.remaining || o.size)} @ $${fmtPrice(o.price)}` });
+                events.push({ type: 'order',
+                              title: '🧾 ' + kind + ' placed' + (o.oid !== null && o.oid !== undefined ? ' #' + o.oid : ''),
+                              text: `${o.coin} ${o.dir_label || o.side_label || o.side} · ${orderAmount(o) || '—'} @ $${fmtPrice(o.price)}` });
             });
             // Снятие: TP и SL часто уходят с разницей в один цикл опроса —
             // группируем по монете и направлению позиции и даём ленте склеить

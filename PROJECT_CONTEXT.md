@@ -322,6 +322,10 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   (TP и SL часто уходят с разницей в один цикл опроса) и шлёт одним блоком;
   лента на сайте доклеивает строку за 25 с, главным ставится тейк, если
   снялись только тейк/стоп (bot._removal_pairs / main._order_dir_label).
+  РАЗМЕР И ЦЕНА: у position-level TP/SL Hyperliquid отдаёт sz = 0 и limitPx
+  без смысла — поэтому в алертах показываем размер позиции и пишем
+  «whole position», а цену берём из triggerPx (та, что ставил юзер).
+  В заголовке тоста сайта теперь есть #oid — есть с чем сверить в HL UI.
   Тип ордера определяет _classify_order/_order_kind: сначала строка orderType
   HL («Take Profit Market», «Stop Market»), иначе триггер сравнивается с ценой
   рынка. В /api/wallet open_orders отдают oid, remaining, notional, is_tp/is_sl,

@@ -567,13 +567,27 @@ async def api_wallet(address: str, request: Request):
     # (Take Profit / Stop Loss / Limit), цену, размер в монете и в USD,
     # а также dir_label — направление ПОЗИЦИИ (у лонга TP/SL продаются,
     # но для юзера это Long, а не Short).
+    # Тонкость Hyperliquid: у position-level TP/SL в API sz = 0 (закрывает всю
+    # позицию) — подставляем размер позиции и помечаем флагом whole_position.
     pos_side_by_coin = {p["coin"]: p.get("side") for p in positions}
     mark_by_coin = {p["coin"]: p.get("mark") or 0 for p in positions}
+    pos_size_by_coin = {}
+    for p in positions:
+        try:
+            pos_size_by_coin[p["coin"]] = abs(float(p.get("size") or 0))
+        except (TypeError, ValueError):
+            pos_size_by_coin[p["coin"]] = 0.0
     open_orders = []
     for o in orders or []:
         try:
-            price = float(o.get("limitPx") or o.get("triggerPx") or 0)
-            remaining = float(o.get("sz") or 0)
+            trigger_px = float(o.get("triggerPx") or 0)
+            limit_px = float(o.get("limitPx") or 0)
+            # для триггерных ордеров показываем цену триггера (её и ставил юзер)
+            price = trigger_px if trigger_px > 0 else limit_px
+            raw_sz = float(o.get("sz") or 0)
+            pos_sz = pos_size_by_coin.get(o.get("coin"), 0.0)
+            remaining = raw_sz or pos_sz            # sz=0 → размер позиции
+            whole = bool(o.get("isPositionTpsl")) or (raw_sz == 0 and pos_sz > 0)
             kind, is_tp, is_sl = _classify_order(o, mark_by_coin.get(o.get("coin"), 0.0))
             dir_label = _order_dir_label(o, kind, pos_side_by_coin.get(o.get("coin"), ""))
             open_orders.append({
@@ -582,14 +596,15 @@ async def api_wallet(address: str, request: Request):
                 "side": o.get("side"),
                 "side_label": _side_label(o.get("side")),
                 "dir_label": dir_label,
-                "size": float(o.get("origSz") or o.get("sz") or 0),
+                "size": float(o.get("origSz") or 0) or remaining,
                 "remaining": remaining,
+                "whole_position": whole,
                 "notional": round(remaining * price, 2),
                 "type": kind,
                 "is_tp": is_tp,
                 "is_sl": is_sl,
                 "price": price,
-                "trigger_px": float(o.get("triggerPx") or 0),
+                "trigger_px": trigger_px,
                 "is_trigger": bool(o.get("isTrigger")),
                 "reduce_only": bool(o.get("reduceOnly")),
                 "time": o.get("timestamp"),
