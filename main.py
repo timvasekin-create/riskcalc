@@ -351,6 +351,15 @@ async def api_wallet(address: str):
     best = max(closed, key=lambda t: t["pnl"], default=None)
     worst = min(closed, key=lambda t: t["pnl"], default=None)
 
+    # Дополнительная статистика: profit factor, средние win/loss
+    wins_list = [t["pnl"] for t in closed if t["pnl"] > 0]
+    losses_list = [t["pnl"] for t in closed if t["pnl"] < 0]
+    gross_win = sum(wins_list)
+    gross_loss = abs(sum(losses_list))
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (None if not wins_list else 999.0)
+    avg_win = round(gross_win / len(wins_list), 2) if wins_list else None
+    avg_loss = round(sum(losses_list) / len(losses_list), 2) if losses_list else None
+
     # Открытые ордера (лимитки, TP/SL, стопы)
     open_orders = []
     for o in orders or []:
@@ -456,12 +465,36 @@ async def api_wallet(address: str):
             except (TypeError, ValueError, IndexError):
                 return None
 
+        def _pnl_series(hist, max_points=60):
+            """Кумулятивная история PnL -> [t, value]; прореживаем до max_points."""
+            if not hist or len(hist) < 2:
+                return []
+            step = max(1, len(hist) // max_points)
+            pts = hist[::step]
+            if pts[-1] != hist[-1]:
+                pts.append(hist[-1])
+            out = []
+            for p in pts:
+                try:
+                    out.append([int(p[0]), round(float(p[1]), 2)])
+                except (TypeError, ValueError, IndexError):
+                    continue
+            return out
+
         pnl_periods = {
             "24h": _period_pnl(windows.get("day")),
             "7d": _period_pnl(windows.get("week")),
             "30d": _period_pnl(windows.get("month")),
             "all": _period_pnl(windows.get("allTime")),
         }
+        # Графики PnL по периодам (для карточки Chart)
+        pnl_charts = {}
+        for key, label in (("24h", "day"), ("7d", "week"), ("30d", "month"), ("all", "allTime")):
+            series = _pnl_series(windows.get(label) or [])
+            if series:
+                pnl_charts[key] = series
+        if not pnl_charts:
+            pnl_charts = {"all": [[int(now * 1000), round(realized, 2)]]}
     except Exception:
         pass
     if pnl_periods.get("24h") is None:
@@ -471,6 +504,50 @@ async def api_wallet(address: str):
             "30d": _pnl_since(closed, now * 1000 - 30 * 24 * 3600 * 1000),
             "all": round(realized, 2),
         }
+
+    # Серии побед/поражений (по порядку закрытия сделок)
+    closed_sorted = sorted(closed, key=lambda t: t["time"] or 0)
+    best_streak = worst_streak = cur_win = cur_loss = 0
+    for t in closed_sorted:
+        if t["pnl"] > 0:
+            cur_win += 1
+            cur_loss = 0
+        else:
+            cur_loss += 1
+            cur_win = 0
+        best_streak = max(best_streak, cur_win)
+        worst_streak = max(worst_streak, cur_loss)
+
+    # Максимальная просадка по кумулятивной all-time кривой PnL
+    max_dd = 0.0
+    peak = None
+    for _p in (pnl_charts or {}).get("all") or []:
+        try:
+            v = float(_p[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        peak = v if peak is None else max(peak, v)
+        max_dd = max(max_dd, peak - v)
+    max_dd = round(max_dd, 2)
+
+    # RustDeck Score (0-100): win rate 30 + profit factor 25 + avg win/loss 20 + просадка 25
+    score = None
+    grade = None
+    if closed:
+        wr = wins / len(closed) * 100
+        s = min(wr, 100) / 100 * 30
+        pf_capped = 3.0 if profit_factor in (None, 999.0) else min(profit_factor, 3.0)
+        s += pf_capped / 3.0 * 25
+        if wins_list and losses_list and avg_loss:
+            rr = min(abs(avg_win / avg_loss), 3.0)
+            s += rr / 3.0 * 20
+        else:
+            s += 10
+        base = max(account_value + spot_value, 100.0)
+        dd_pct = max_dd / base * 100
+        s += max(0.0, 1 - dd_pct / 50) * 25
+        score = int(round(min(100.0, max(0.0, s))))
+        grade = "S" if score >= 85 else "A" if score >= 70 else "B" if score >= 55 else "C" if score >= 40 else "D"
 
     data_out = {
         "address": address,
@@ -488,12 +565,21 @@ async def api_wallet(address: str):
             "closed_trades": len(closed),
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
             "realized_pnl": round(realized, 2),
+            "profit_factor": profit_factor,
+            "avg_win": avg_win,
+            "avg_loss": avg_loss,
             "best_trade": {"coin": best["coin"], "pnl": round(best["pnl"], 2)} if best else None,
             "worst_trade": {"coin": worst["coin"], "pnl": round(worst["pnl"], 2)} if worst else None,
+            "streaks": {"best_win": best_streak, "worst_loss": worst_streak},
+            "max_drawdown_usd": max_dd,
+            "score": score,
+            "grade": grade,
         },
         "recent_trades": recent,
         # PnL по периодам: приоритет — API portfolio, фолбэк — сумма по филлам
         "pnl_periods": pnl_periods,
+        # График PnL: {period: [[t_ms, cumulative_pnl], ...]}
+        "pnl_charts": pnl_charts,
         "updated": int(now),
     }
     WALLET_CACHE[key] = {"data": data_out, "ts": now}
@@ -806,11 +892,19 @@ _threading.Thread(target=_whale_refresh_loop, daemon=True, name="rustdeck-whales
 
 # ===== API: привязка Telegram =====
 @app.post("/api/tg/link/start")
-async def tg_link_start():
-    """Сайт просит 6-значный код привязки. Юзер отправит его боту."""
+async def tg_link_start(request: Request):
+    """Сайт просит 6-значный код привязки. Юзер отправит его боту.
+    Тело (необязательно): {"email": "user@example.com"} — аккаунт с сайта."""
     if not BOT_ENABLED:
         return JSONResponse({"error": "bot_disabled"}, status_code=503)
-    code = tg_bot.create_link_code()
+    email = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            email = (body.get("email") or "").strip().lower() or None
+    except Exception:
+        email = None
+    code = tg_bot.create_link_code(email)
     if not code:
         return JSONResponse({"error": "code_generation_failed"}, status_code=500)
     username = tg_bot.get_bot_username()

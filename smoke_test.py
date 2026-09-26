@@ -96,7 +96,9 @@ try:
         hub = r.read().decode("utf-8", "replace")
     for must in ["Wallet Tracker", "RustDeckcryptobot", "Track Wallet", "marketsTable",
                  "fundingHigh", "profileArea", "alertsToggle", "exportCsvBtn", "ordersTable",
-                 "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "refreshWalletBtn", "</html>"]:
+                 "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "refreshWalletBtn",
+                 "chartBlock", "chartToggles", "pnlChart", "stPF",
+                 "scoreBlock", "scoreGrade", "followTgBtn", "startTgLink", "tgDeepLink", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
     log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
@@ -119,6 +121,11 @@ try:
         assert "stats" in w, "нет stats в ответе"
         assert "spot_value" in w, "нет spot_value в ответе"
         assert "account_total" in w, "нет account_total в ответе"
+        assert "pnl_charts" in w, "нет pnl_charts в ответе (график PnL)"
+        assert "profit_factor" in w["stats"], "нет profit_factor в stats"
+        assert "score" in w["stats"], "нет score в stats (RustDeck Score)"
+        assert "streaks" in w["stats"], "нет streaks в stats"
+        assert "max_drawdown_usd" in w["stats"], "нет max_drawdown_usd в stats"
     except urllib.error.HTTPError as e:
         log(f"WALLET API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:
@@ -216,8 +223,8 @@ try:
         log("WATCH OK: невалидный адрес отклонён")
 
         # ГОЛЫЙ адрес без /watch — должен запускать слежение (как прислал юзер)
-        def _msg(t):
-            return {"message": {"chat": {"id": 777000}, "from": {"username": "tester"}, "text": t}}
+        def _msg(t, chat=777000):
+            return {"message": {"chat": {"id": chat}, "from": {"username": "tester"}, "text": t}}
         _bot.handle_update(_msg("0x000000000000000000000000000000000000dEaD"))
         conn = _bot._db()
         w4 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
@@ -238,6 +245,77 @@ try:
         conn.close()
         assert w6["watched_wallet"] == "0x000000000000000000000000000000000000dead", "адрес без 0x не распознан"
         log("WATCH OK: адрес без 0x распознаётся")
+
+        # МУЛЬТИ-КОШЕЛЬКИ: до 5 адресов на аккаунт, дубликаты не добавляются
+        _bot._cmd_unwatch(777000)  # очистка перед тестом
+        a1 = "0x0000000000000000000000000000000000000001"
+        a2 = "0x0000000000000000000000000000000000000002"
+        _bot._cmd_watch(777000, 'tester', '/watch ' + a1)
+        _bot._cmd_watch(777000, 'tester', '/watch ' + a2)
+        conn = _bot._db()
+        wm = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert wm["watched_wallet"] == f"{a1},{a2}", f"мульти-watch сломан: {wm['watched_wallet']}"
+        log("WATCH OK: 2 кошелька на аккаунт (список через запятую)")
+
+        _bot._cmd_watch(777000, 'tester', '/watch ' + a1)  # повторный — не дублирует
+        conn = _bot._db()
+        wm2 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert wm2["watched_wallet"] == f"{a1},{a2}", f"дубликат добавлен: {wm2['watched_wallet']}"
+        log("WATCH OK: повторный /watch не дублирует адрес")
+
+        _bot._cmd_unwatch(777000, '/unwatch ' + a1)  # убрать только один
+        conn = _bot._db()
+        wm3 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        assert wm3["watched_wallet"] == a2, f"/unwatch 0x… не удалил один адрес: {wm3['watched_wallet']}"
+        log("WATCH OK: /unwatch 0x… убирает только указанный кошелёк")
+
+        # Лимит: максимум 5 адресов
+        for i in range(3, 8):
+            _bot._cmd_watch(777000, 'tester', f'/watch 0x{(str(i) * 3).rjust(40, "0")}')
+        conn = _bot._db()
+        wm4 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (777000,)).fetchone()
+        conn.close()
+        cnt = len(_bot._parse_watched(wm4["watched_wallet"]))
+        assert cnt == 5, f"лимит {5} кошельков не работает: {cnt}"
+        log("WATCH OK: лимит 5 кошельков на аккаунт")
+
+        # EMAIL-АККАУНТ: один триал на email — второй Telegram-аккаунт без триала
+        conn = _bot._db()
+        conn.execute("DELETE FROM subscribers WHERE chat_id IN (888001, 888002)")
+        conn.commit()
+        conn.close()
+        c3 = _bot.create_link_code("Tester@Example.com")
+        _bot._try_link(888001, 'tester2', c3)
+        conn = _bot._db()
+        s1 = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (888001,)).fetchone()
+        conn.close()
+        assert s1["email"] == "tester@example.com", f"email не сохранён lowercase: {s1['email']}"
+        assert s1["tier"] == "trial", "первый аккаунт должен получить триал"
+        log("EMAIL OK: email аккаунта сохранён (lowercase), триал выдан")
+
+        c4 = _bot.create_link_code("tester@example.com")
+        _bot._try_link(888002, 'tester3', c4)
+        conn = _bot._db()
+        s2 = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (888002,)).fetchone()
+        conn.close()
+        assert s2["tier"] == "free", f"второй аккаунт того же email не должен получать триал: {s2['tier']}"
+        log("EMAIL OK: повторный триал на тот же email не выдаётся (tier=free)")
+
+        # Deep-link /start watch_0x… (кнопка 👁 в Whale Feed / лидерборде)
+        _bot.handle_update(_msg("/start watch_0x0000000000000000000000000000000000000001", chat=888001))
+        conn = _bot._db()
+        s3 = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (888001,)).fetchone()
+        conn.close()
+        assert s3["watched_wallet"] == "0x0000000000000000000000000000000000000001", f"deep-link watch не сработал: {s3['watched_wallet']}"
+        log("WATCH OK: deep-link /start watch_0x… запускает слежение из TG")
+
+        conn = _bot._db()
+        conn.execute("DELETE FROM subscribers WHERE chat_id IN (888001, 888002)")
+        conn.commit()
+        conn.close()
 
         _bot._cmd_unwatch(777000)
         conn = _bot._db()

@@ -160,6 +160,7 @@
                             <div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Win Rate</div>
                             <div id="stWinRate" class="text-xl font-bold text-white font-mono">—</div>
                             <div id="stTrades" class="text-[10px] text-hyper-muted mt-0.5">0 closed trades</div>
+                            <div id="stPF" class="text-[10px] text-hyper-muted mt-0.5">PF — · Avg win — / loss —</div>
                         </div>
                         <div class="stat-card">
                             <div class="flex items-center justify-between flex-wrap gap-1 mb-1">
@@ -174,6 +175,30 @@
                             <div id="stPnl" class="text-xl font-bold font-mono">$0.00</div>
                             <div id="stBest" class="text-[10px] text-hyper-muted mt-0.5 truncate">Best trade: —</div>
                         </div>
+                    </div>
+
+                    <!-- RustDeck Score -->
+                    <div id="scoreBlock" class="mb-5 bg-hyper-bg border border-hyper-border rounded-lg p-4 flex items-center gap-4">
+                        <div id="scoreGrade" class="w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-black shrink-0 bg-hyper-border/40 text-hyper-muted">—</div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold mb-0.5">RustDeck Score</div>
+                            <div id="scoreLine" class="text-sm text-white font-semibold">Track a wallet to see its score</div>
+                            <div id="scoreMeta" class="text-[11px] text-hyper-muted2 mt-0.5 truncate"></div>
+                        </div>
+                    </div>
+
+                    <!-- График PnL -->
+                    <div id="chartBlock" class="mb-5 bg-hyper-bg border border-hyper-border rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold">PnL Chart</div>
+                            <div class="flex gap-0.5" id="chartToggles">
+                                <button type="button" data-c="24h" class="pnlp-btn">24H</button>
+                                <button type="button" data-c="7d" class="pnlp-btn">7D</button>
+                                <button type="button" data-c="30d" class="pnlp-btn active">30D</button>
+                                <button type="button" data-c="all" class="pnlp-btn">All</button>
+                            </div>
+                        </div>
+                        <div id="pnlChart"></div>
                     </div>
 
                     <div id="positionsBlock" class="mb-5">
@@ -226,7 +251,10 @@
 
                     <div class="mt-4 text-[10px] text-hyper-muted font-mono flex items-center justify-between" id="walletUpdated">
                         <span></span>
-                        <button type="button" id="refreshWalletBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Refresh wallet data">⟳ Refresh</button>
+                        <span class="flex items-center gap-2">
+                            <a id="followTgBtn" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Get alerts for this wallet in Telegram 24/7">✈️ Watch in TG</a>
+                            <button type="button" id="refreshWalletBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Refresh wallet data">⟳ Refresh</button>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -312,8 +340,8 @@
             <div class="bg-hyper-panel border border-hyper-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-4">
                 <div class="text-3xl">✈️</div>
                 <div class="flex-1 text-center md:text-left">
-                    <div class="text-sm font-bold text-white mb-1">Watch any wallet in Telegram — 24/7</div>
-                    <div class="text-[12px] text-hyper-muted2">Send <span class="font-mono text-hyper-teal">/watch 0x…</span> with any Hyperliquid address — the bot pings you on opens, closes, liquidations and fills. <span class="text-hyper-teal font-semibold">7 days free</span>.</div>
+                    <div class="text-sm font-bold text-white mb-1">Watch up to 5 wallets in Telegram — 24/7</div>
+                    <div class="text-[12px] text-hyper-muted2">Sign in (top right) → <span class="font-semibold text-hyper-teal">Create link code</span> → send <span class="font-mono text-hyper-teal">/link CODE</span> to the bot. Then watch any Hyperliquid wallet — the bot pings you on opens, closes, liquidations and fills. <span class="text-hyper-teal font-semibold">7 days free</span>.</div>
                 </div>
                 <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 px-8 rounded-lg transition-all text-[12px] uppercase tracking-wider whitespace-nowrap">
                     Open @RustDeckcryptobot
@@ -422,6 +450,7 @@
                 }
                 renderWallet(j);
                 currentWalletAddr = addr;
+                $('followTgBtn').href = 'https://t.me/RustDeckcryptobot?start=watch_' + addr;
                 if (profile) { profile.lastWallet = addr; saveProfile(profile); }
                 renderChips();
                 if (getAlerts().enabled) startWatching();
@@ -444,7 +473,29 @@
             up.className = 'text-xl font-bold font-mono ' + pnlCls(d.unrealized_pnl);
             $('stWinRate').textContent = d.stats.win_rate !== null ? d.stats.win_rate + '%' : '—';
             $('stTrades').textContent = d.stats.closed_trades + ' closed trades';
+            const pf = d.stats.profit_factor;
+            $('stPF').textContent = (pf !== null && pf !== undefined)
+                ? `PF ${pf === 999 ? '∞' : pf} · Avg +$${fmtUsd(Math.abs(d.stats.avg_win || 0))} / -$${fmtUsd(Math.abs(d.stats.avg_loss || 0))}`
+                : 'PF — · Avg win — / loss —';
+
+            // RustDeck Score + серии + max drawdown
+            const st = d.stats || {};
+            const gradeEl = $('scoreGrade');
+            if (st.score !== null && st.score !== undefined) {
+                gradeEl.textContent = st.grade;
+                const gcls = { S: 'bg-hyper-teal/20 text-hyper-teal', A: 'bg-hyper-teal/15 text-hyper-teal', B: 'bg-hyper-yellow/15 text-hyper-yellow', C: 'bg-hyper-yellow/10 text-hyper-yellow', D: 'bg-hyper-red/15 text-hyper-red' };
+                gradeEl.className = 'w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-black shrink-0 ' + (gcls[st.grade] || gcls.B);
+                $('scoreLine').textContent = `${st.score} / 100 · Win rate ${st.win_rate}% · PF ${st.profit_factor === 999 ? '∞' : st.profit_factor}`;
+            } else {
+                gradeEl.textContent = '—';
+                gradeEl.className = 'w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-black shrink-0 bg-hyper-border/40 text-hyper-muted';
+                $('scoreLine').textContent = 'Not enough closed trades yet';
+            }
+            const sk = st.streaks || {};
+            $('scoreMeta').textContent = `Best win streak ×${sk.best_win || 0} · Worst loss streak ×${sk.worst_loss || 0} · Max drawdown $${fmtUsd(st.max_drawdown_usd || 0)}`;
+
             setPnlPeriod(currentPeriod);
+            renderPnlChart(chartPeriod);
 
             const pBody = $('positionsTable').querySelector('tbody');
             pBody.innerHTML = (d.positions || []).map(p => `
@@ -519,6 +570,7 @@
 
         // ===== Тумблер периода PnL (24h / 7d / 30d / All-time) =====
         let currentPeriod = 'all';
+        let chartPeriod = '30d';
 
         function setPnlPeriod(period) {
             currentPeriod = period;
@@ -533,6 +585,46 @@
             document.querySelectorAll('#pnlToggles .pnlp-btn').forEach(b =>
                 b.classList.toggle('active', b.dataset.period === period));
         }
+
+        // ===== PnL-график (SVG, данные из API portfolio) =====
+        function renderPnlChart(period) {
+            chartPeriod = period;
+            const d = window.__walletData;
+            if (!d) return;
+            const h = (d.pnl_charts || {})[period] || [];
+            const wrap = $('chartBlock');
+            if (wrap) wrap.classList.toggle('hidden', h.length < 2);
+            if (h.length < 2) return;
+            const W = 600, H = 130, P = 6;
+            const vals = h.map(p => p[1]);
+            const min = Math.min(...vals, 0), max = Math.max(...vals, 0);
+            const range = (max - min) || 1;
+            const pts = vals.map((v, i) => [
+                P + i * (W - 2 * P) / (vals.length - 1),
+                H - P - (v - min) * (H - 2 * P) / range
+            ]);
+            const line = pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
+            const zeroY = H - P - (0 - min) * (H - 2 * P) / range;
+            const color = vals[vals.length - 1] >= 0 ? '#50d2c1' : '#f6465d';
+            const last = pnlSign(vals[vals.length - 1]);
+            $('pnlChart').innerHTML = `
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:130px;display:block;">
+                    <line x1="0" y1="${zeroY.toFixed(1)}" x2="${W}" y2="${zeroY.toFixed(1)}" stroke="#1e252e" stroke-width="1" stroke-dasharray="4,4"/>
+                    <polygon points="0,${H} ${line} ${W},${H}" fill="${color}" opacity="0.07"/>
+                    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+                    <circle cx="${pts[pts.length - 1][0].toFixed(1)}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="3.5" fill="${color}"/>
+                </svg>
+                <div class="flex justify-between text-[10px] font-mono text-hyper-muted mt-1">
+                    <span>${new Date(h[0][0]).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span>
+                    <span class="${pnlCls(vals[vals.length - 1])} font-bold">${last}</span>
+                    <span>now</span>
+                </div>`;
+            document.querySelectorAll('#chartToggles .pnlp-btn').forEach(b =>
+                b.classList.toggle('active', b.dataset.c === period));
+        }
+
+        document.querySelectorAll('#chartToggles .pnlp-btn').forEach(b =>
+            b.addEventListener('click', () => renderPnlChart(b.dataset.c)));
 
         document.querySelectorAll('#pnlToggles .pnlp-btn').forEach(b =>
             b.addEventListener('click', () => setPnlPeriod(b.dataset.period)));
@@ -612,7 +704,8 @@
                         <span class="text-hyper-muted2">${esc(e.dir || e.side)}</span>
                         <span class="font-mono font-bold text-hyper-yellow">@ $${fmtCompact(e.notional)}</span>
                         <span class="text-hyper-muted font-mono text-[11px]">${shortAddr(e.address)}</span>
-                        <span class="font-mono text-[11px] text-hyper-muted ml-auto">${new Date(e.time).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false})}</span>
+                        <a class="font-mono text-[11px] text-hyper-muted hover:text-hyper-teal ml-auto px-1" href="https://t.me/RustDeckcryptobot?start=watch_${e.address}" target="_blank" rel="noopener" title="Follow this whale in Telegram" onclick="event.stopPropagation()">👁 TG</a>
+                        <span class="font-mono text-[11px] text-hyper-muted">${new Date(e.time).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false})}</span>
                     </div>`;
                 }).join('');
             } catch(e) { /* пропускаем обновление */ }
@@ -645,7 +738,10 @@
                     <td class="font-mono font-bold ${pnlCls(t.pnl)}">${pnlSign(t.pnl)}</td>
                     <td class="font-mono ${pnlCls(t.roi)}">${t.roi >= 0 ? '+' : ''}${t.roi.toFixed(1)}%</td>
                     <td class="font-mono text-hyper-muted2">${fmtCompact(t.vlm)}</td>
-                    <td><button type="button" class="text-[10px] px-2 py-0.5 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono lb-track" data-addr="${t.address}">Track</button></td>
+                    <td class="whitespace-nowrap">
+                        <button type="button" class="text-[10px] px-2 py-0.5 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono lb-track" data-addr="${t.address}">Track</button>
+                        <a class="text-[10px] px-1.5 py-0.5 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono inline-block ml-1" href="https://t.me/RustDeckcryptobot?start=watch_${t.address}" target="_blank" rel="noopener" title="Follow in Telegram 24/7">👁</a>
+                    </td>
                 </tr>`;
             }).join('');
         }
@@ -708,27 +804,72 @@
             if (!profile) {
                 area.innerHTML = '<button id="signInBtn" class="text-[11px] font-semibold px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider">Sign in</button>';
                 $('signInBtn').addEventListener('click', promptSignIn);
-            } else {
-                area.innerHTML = `<div class="flex items-center gap-2 text-[12px]">
-                    <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc(profile.name[0].toUpperCase())}</span>
-                    <span class="text-hyper-text font-semibold hidden sm:inline">${esc(profile.name)}</span>
-                    <button id="signOutBtn" class="text-[11px] text-hyper-muted hover:text-hyper-red transition-colors ml-1">Sign out</button>
-                </div>`;
-                $('signOutBtn').addEventListener('click', () => {
-                    profile = null;
-                    localStorage.removeItem(PKEY);
-                    renderProfile();
-                    renderChips();
-                    applyAlertSettings();
-                });
+                return;
             }
+            const emailRow = profile.email
+                ? `<div class="text-hyper-muted2 text-[11px] mb-3 font-mono truncate">${esc(profile.email)}</div>`
+                : '<button id="addEmailBtn" class="w-full mb-3 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Add email — needed for linking</button>';
+            area.innerHTML = `<div class="relative">
+                <button id="profileBtn" class="flex items-center gap-2 text-[12px]">
+                    <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc((profile.name || profile.email || '?').slice(0, 1).toUpperCase())}</span>
+                    <span class="text-hyper-text font-semibold hidden sm:inline">${esc(profile.name || profile.email)}</span>
+                </button>
+                <div id="profilePanel" class="hidden absolute right-0 top-full mt-2 w-80 bg-hyper-panel border border-hyper-border rounded-xl p-4 text-left z-50 shadow-2xl">
+                    <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1">Account</div>
+                    <div class="text-white font-semibold text-sm">${esc(profile.name || 'Trader')}</div>
+                    ${emailRow}
+                    <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1.5">Telegram alerts</div>
+                    <div class="flex gap-2 mb-2">
+                        <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="flex-1 text-center text-[11px] px-2 py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-semibold">✈️ Open bot</a>
+                        <button id="createCodeBtn" class="flex-1 text-[11px] px-2 py-2 rounded-md bg-hyper-teal/15 text-hyper-teal border border-hyper-teal/40 hover:bg-hyper-teal/25 transition-colors font-semibold">🔑 Create code</button>
+                    </div>
+                    <div id="tgLinkBox" class="hidden text-[11px] text-hyper-muted2">
+                        <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 mb-2">
+                            <div class="text-hyper-muted text-[10px] mb-1">Send this code in Telegram — write <span class="font-mono text-hyper-teal">/link CODE</span>:</div>
+                            <div class="flex items-center gap-2">
+                                <span id="tgCode" class="font-mono text-2xl font-bold text-white tracking-[0.3em]">------</span>
+                                <button id="tgCopyBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border hover:text-hyper-teal hover:border-hyper-teal transition-colors">Copy</button>
+                            </div>
+                            <a id="tgDeepLink" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="mt-2 block text-center text-[11px] py-1.5 rounded-md bg-hyper-teal text-hyper-bg font-bold">Open Bot &amp; Confirm</a>
+                        </div>
+                        <div id="tgLinkedStatus" class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…</div>
+                    </div>
+                    <button id="signOutBtn" class="mt-3 w-full text-[11px] text-hyper-muted hover:text-hyper-red transition-colors">Sign out</button>
+                </div>
+            </div>`;
+            $('profileBtn').addEventListener('click', e => { e.stopPropagation(); $('profilePanel').classList.toggle('hidden'); });
+            $('signOutBtn').addEventListener('click', () => {
+                profile = null;
+                localStorage.removeItem(PKEY);
+                renderProfile();
+                renderChips();
+                applyAlertSettings();
+            });
+            const addEmail = $('addEmailBtn');
+            if (addEmail) addEmail.addEventListener('click', () => {
+                const em = prompt('Your email — the RustDeck account ID for Telegram linking and future billing.\nStored in this browser only.');
+                if (!em || !em.trim()) return;
+                if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em.trim())) { alert('Please enter a valid email.'); return; }
+                profile.email = em.trim().toLowerCase();
+                saveProfile(); renderProfile();
+            });
+            $('createCodeBtn').addEventListener('click', startTgLink);
+            $('tgCopyBtn').addEventListener('click', () => {
+                const code = $('tgCode').textContent.trim();
+                if (navigator.clipboard) navigator.clipboard.writeText(code);
+                $('tgCopyBtn').textContent = '✓ Copied';
+                setTimeout(() => { $('tgCopyBtn').textContent = 'Copy'; }, 1500);
+            });
         }
 
         function promptSignIn() {
-            const name = prompt('Choose a display name for your local profile.\nIt is stored only in this browser — no server, no password.');
-            if (!name || !name.trim()) return;
+            const email = prompt('Welcome to RustDeck!\n\nEnter your email — it is your account ID (Telegram linking, future billing).\nStored in this browser only — no password yet.');
+            if (!email || !email.trim()) return;
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { alert('Please enter a valid email.'); return; }
+            const name = prompt('Display name (optional):');
             profile = {
-                name: name.trim().slice(0, 24),
+                email: email.trim().toLowerCase(),
+                name: ((name || '').trim() || email.trim().split('@')[0]).slice(0, 24),
                 wallets: [],
                 alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, sound: true },
                 lastWallet: ''
@@ -737,6 +878,51 @@
             renderProfile();
             renderChips();
             applyAlertSettings();
+        }
+
+        // Клик вне панели профиля — закрыть её
+        document.addEventListener('click', e => {
+            const panel = $('profilePanel');
+            if (!panel || panel.classList.contains('hidden')) return;
+            if (!panel.contains(e.target) && !e.target.closest('#profileBtn')) panel.classList.add('hidden');
+        });
+
+        // ===== ПРИВЯЗКА TELEGRAM: сайт даёт код, юзер пишет /link CODE боту =====
+        let tgPollTimer = null;
+        async function startTgLink() {
+            const btn = $('createCodeBtn');
+            const box = $('tgLinkBox');
+            box.classList.remove('hidden');
+            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…';
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/tg/link/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ email: (profile && profile.email) || null })
+                });
+                const j = await r.json();
+                if (!r.ok) { alert('Telegram linking is temporarily unavailable. Try later.'); return; }
+                $('tgCode').textContent = j.code;
+                if (j.deep_link) $('tgDeepLink').href = j.deep_link;
+                clearInterval(tgPollTimer);
+                tgPollTimer = setInterval(async () => {
+                    try {
+                        const s = await (await fetch('/api/tg/link/status/' + j.code)).json();
+                        if (s.status === 'linked') {
+                            clearInterval(tgPollTimer);
+                            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked! Check your Telegram DMs.';
+                        } else if (s.status === 'expired' || s.status === 'not_found') {
+                            clearInterval(tgPollTimer);
+                            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-red"></span> Code expired — create a new one.';
+                        }
+                    } catch(e) {}
+                }, 3000);
+            } catch(e) {
+                alert('Network error. Try again.');
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         // ===== СОХРАНЁННЫЕ КОШЕЛЬКИ =====

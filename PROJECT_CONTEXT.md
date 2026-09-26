@@ -46,12 +46,17 @@ riskcalc/
 - Живой тикер и живые цены: /api/prices (Binance + Hyperliquid, кэш 30с, все 12 монет)
 - Живая привязка цен: Entry Price автозаполняется ценой выбранного актива
 - Telegram-бот @RustDeckcryptobot: /start, /link <код>, /prices (Binance+HL, БЕЗ CoinGecko —
-  он блокирует датацентр-IP), /watch 0x… (СЛЕЖЕНИЕ ЗА КОШЕЛЬКОМ 24/7: фоновый поток
-  опрашивает HL раз в 60с, шлёт в TG: открытие/закрытие позиции, ликвидация, любые филлы),
-  /watching, /unwatch, /status, /help. Все сообщения на английском.
-  Привязка сайт↔бот через 6-значный код (15 мин). БД SQLite (эфемерная на Render!):
-  subscribers (tier trial 7 дней — ОДИН триал на аккаунт, повторные линки НЕ продлевают,
-  watched_wallet). Watcher работает с ЛЮБЫМ кошельком HL, доступ по подписке.
+  он блокирует датацентр-IP), /watch 0x… (СЛЕЖЕНИЕ ЗА КОШЕЛЬКАМИ 24/7: МУЛЬТИ до 5 адресов
+  на аккаунт, фоновый поток опрашивает HL раз в 60с, шлёт в TG: открытие/закрытие позиции,
+  ликвидация, любые филлы; дедупликация — один опрос HL на адрес, даже если за ним следят
+  несколько юзеров), /watching (список N/5), /unwatch [0x…] (одного или всех), /status,
+  /help. Все сообщения на английском. Привязка сайт↔бот через 6-значный код (15 мин):
+  профиль на хабе → "🔑 Create code" (+email) → юзер пишет /link КОД боту.
+  АВТОРИЗАЦИЯ = EMAIL: аккаунт-ID из профиля (без пароля и без писем — экономия RAM).
+  ОДИН ТРИАЛ на Telegram И один на email (повторный email на другом чате → tier=free).
+  Deep-link /start watch_0x… (кнопки 👁 в Whale Feed / лидерборде, "✈️ Watch in TG"
+  у трекера) — сразу запускает слежение. БД SQLite (эфемерная на Render!):
+  subscribers (email, watched_wallet = адреса через запятую, tier trial 7 дней).
 - ГЛАВНАЯ rustdeck.app (app/index.html) — рабочее приложение, НЕ лендинг:
   * WALLET TRACKER (главная фича): вводишь любой HL-адрес → account value, unrealized/realized
     PnL, win rate, открытые позиции (liq distance!), последние 12 сделок. Бэкенд
@@ -67,9 +72,14 @@ riskcalc/
     WebAudio (низкий тон = убыток/ликвидация), тумблеры событий (open/close/liquidation/
     any fill/sound), лента событий. Опрос /api/wallet каждые 25с, diff состояний.
     Настройки в localStorage профиля.
-  * ЛОКАЛЬНЫЙ ПРОФИЛЬ: Sign in в шапке (имя + сохранённые кошельки + lastWallet,
-    всё в localStorage rustdeck_profile_v1, БЕЗ серверной авторизации). Чипы
-    сохранённых кошельков над формой (клик = отследить, ✕ = удалить), кнопка ＋ Save wallet.
+  * ЛОКАЛЬНЫЙ ПРОФИЛЬ / АВТОРИЗАЦИЯ (email): Sign in = email (валидируется) + имя. Кнопка
+    профиля в шапке → панель: email, "✈️ Open bot" + "🔑 Create code"
+    (POST /api/tg/link/start с email), код + Copy + "Open Bot & Confirm" (deep-link ?start=КОД)
+    + автоопрос статуса каждые 3с → "✅ Linked". Кошельки/алерты/lastWallet — в localStorage
+    rustdeck_profile_v1. Клик вне панели закрывает её.
+  * RUSTDECK SCORE: карточка с грейдом (S/A/B/C/D) и 0-100 очков (win rate 30 + profit
+    factor 25 + avg win/loss 20 + просадка 25), серии побед/поражений, max drawdown USD.
+    Кнопки 👁 (follow в TG) в Whale Feed и лидерборде; "✈️ Watch in TG" у трекера (deep-link).
   * OPEN ORDERS: таблица лимиток/TP/SL (frontendOpenOrders) в результатах трекера.
   * EXPORT CSV: кнопка у Recent Trades → /api/fills/{address}?limit=500 → скачивание.
   * WHALE FEED: лента сделок >= $250K у топ-40 китов HL за 24ч (бейджи OPEN/WIN/LOSS/LIQ),
@@ -83,10 +93,15 @@ riskcalc/
   * PnL-периоды (24H/7D/30D/All) — из API portfolio (кумулятивный pnlHistory,
     последний минус первый) — сверено с эксплорером HL ($23.47 all-time).
     Фолбэк — сумма по филлам.
+  * PnL-ГРАФИК: SVG-полилиния из pnl_charts{period} (кумулятив), тумблеры 24H/7D/30D/All,
+    зелёный/красный по знаку; карточка скрывается, если < 2 точек данных.
+  * WIN RATE карточка: + Profit Factor (∞ когда нет убытков) и Avg win / Avg loss.
 - Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
   calc.rustdeck.app/localhost → калькулятор
-- smoke_test.py — все роуты, host-роутинг, /api/wallet, /api/funding, /api/markets,
-  /api/fills, /api/leaderboard, /api/whales, логика одного-триала, watch ×5
+- smoke_test.py — все роуты, host-роутинг, /api/wallet (+pnl_charts/profit_factor/score/
+  streaks/max_drawdown_usd), /api/funding, /api/markets, /api/fills, /api/leaderboard,
+  /api/whales, логика одного-триала, watch ×5, мульти-кошельки (2 адреса, дубликаты,
+  /unwatch 0x, лимит 5), email-триал (один на email), deep-link /start watch_0x…
 
 ## TELEGRAM-БОТ (сделано)
 - @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,

@@ -10,6 +10,10 @@ Telegram-бот RustDeck (@RustDeckcryptobot)
   /start [код]  — приветствие + привязка по коду с сайта
   /link <код>   — привязка Telegram к сайту (пробный период 7 дней)
   /prices       — живые цены топ-5 монет
+  /top          — топ-5 трейдеров дня
+  /watch 0x…    — слежение за кошельками HL 24/7 (до 5 на аккаунт)
+  /watching     — список отслеживаемых кошельков
+  /unwatch [0x…]— остановить одного или всех
   /status       — статус подписки
   /help         — список команд
 
@@ -31,6 +35,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rustdeck.db"
 
 TRIAL_DAYS = 7          # пробный период при привязке
 CODE_TTL = 15 * 60      # код привязки живёт 15 минут
+WATCH_LIMIT = 5         # максимум кошельков на аккаунт (мульти-/watch)
 
 _db_lock = threading.Lock()
 _bot_username_cache = {"name": None, "ts": 0.0}
@@ -63,10 +68,15 @@ def init_db():
             linked_at  REAL
         );
         """)
-        # Миграция: колонка отслеживаемого кошелька
+        # Миграции: колонки отслеживаемых кошельков и email (аккаунт с сайта)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()]
         if "watched_wallet" not in cols:
             conn.execute("ALTER TABLE subscribers ADD COLUMN watched_wallet TEXT")
+        if "email" not in cols:
+            conn.execute("ALTER TABLE subscribers ADD COLUMN email TEXT")
+        lcols = [r[1] for r in conn.execute("PRAGMA table_info(links)").fetchall()]
+        if "email" not in lcols:
+            conn.execute("ALTER TABLE links ADD COLUMN email TEXT")
         conn.commit()
         conn.close()
 
@@ -114,8 +124,10 @@ def get_bot_username():
 # ============================================================
 # Привязка сайта ↔ Telegram (используется main.py)
 # ============================================================
-def create_link_code():
-    """Сайт генерирует 6-значный код, юзер отправляет его боту."""
+def create_link_code(email=None):
+    """Сайт генерирует 6-значный код, юзер отправляет его боту.
+    email — аккаунт с сайта (по нему считаем «один триал на аккаунт»)."""
+    email = (email or "").strip().lower() or None
     conn = _db()
     code = None
     for _ in range(20):
@@ -127,8 +139,8 @@ def create_link_code():
         conn.close()
         return None
     conn.execute(
-        "INSERT INTO links (code, status, created_at) VALUES (?, 'pending', ?)",
-        (code, time.time()),
+        "INSERT INTO links (code, status, created_at, email) VALUES (?, 'pending', ?, ?)",
+        (code, time.time(), email),
     )
     conn.commit()
     conn.close()
@@ -197,6 +209,16 @@ def _wallet_snapshot(addr):
     return {"positions": positions, "fill_keys": fill_keys}
 
 
+def _parse_watched(raw):
+    """Строка 'addr1,addr2' -> валидный lowercase-список без дублей."""
+    out = []
+    for a in (raw or "").split(","):
+        a = a.strip().lower()
+        if re.fullmatch(r"0x[0-9a-f]{40}", a) and a not in out:
+            out.append(a)
+    return out
+
+
 def _watch_loop():
     """Фоновый цикл: раз в 60с опрашивает отслеживаемые кошельки подписчиков."""
     cache = {}  # addr -> snapshot
@@ -207,10 +229,17 @@ def _watch_loop():
                 "SELECT chat_id, watched_wallet FROM subscribers WHERE watched_wallet IS NOT NULL"
             ).fetchall()
             conn.close()
+
+            # addr -> {chat_id, ...}: дедупликация — один опрос HL на адрес,
+            # даже если за кошельком следят несколько юзеров
+            subs_map = {}
             for row in rows:
-                addr = (row["watched_wallet"] or "").strip()
-                if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
-                    continue
+                for a in _parse_watched(row["watched_wallet"]):
+                    subs_map.setdefault(a, set()).add(row["chat_id"])
+            # чистим кэш по адресам, которые больше никто не отслеживает
+            cache = {a: s for a, s in cache.items() if a in subs_map}
+
+            for addr, chat_ids in subs_map.items():
                 try:
                     snap = _wallet_snapshot(addr)
                 except Exception:
@@ -256,7 +285,8 @@ def _watch_loop():
                         events.append(f"🔒 *Position closed:* {c}")
 
                 for ev in events:
-                    send_message(row["chat_id"], ev)
+                    for cid in chat_ids:
+                        send_message(cid, ev)
         except Exception:
             pass
         time.sleep(60)
@@ -266,7 +296,8 @@ def _watch_loop():
 # Команды бота
 # ============================================================
 def _try_link(chat_id, username, code):
-    """Юзер отправил код боту — связываем аккаунты."""
+    """Юзер отправил код боту — связываем аккаунты.
+    Триал: один на Telegram-аккаунт И один на email (аккаунт сайта)."""
     conn = _db()
     row = conn.execute("SELECT * FROM links WHERE code=?", (code,)).fetchone()
     if not row:
@@ -282,29 +313,58 @@ def _try_link(chat_id, username, code):
         send_message(chat_id, "⌛ Code expired (codes live for 15 minutes). Generate a new one on the website.")
         return
 
+    email = None
+    try:
+        email = (row["email"] or "").strip().lower() or None
+    except (IndexError, KeyError):
+        pass
+
     expires = time.time() + TRIAL_DAYS * 86400
     conn.execute(
         "UPDATE links SET status='linked', chat_id=? WHERE code=?", (chat_id, code)
     )
-    # ОДИН триал на аккаунт: повторная привязка НЕ продлевает подписку.
     existing = conn.execute(
         "SELECT * FROM subscribers WHERE chat_id=?", (chat_id,)
     ).fetchone()
+    # Триал по email: если этот email уже получал триал на другом чате — второй не даём
+    email_used = False
+    if email:
+        email_used = conn.execute(
+            "SELECT 1 FROM subscribers WHERE email=? AND chat_id<>? LIMIT 1",
+            (email, chat_id),
+        ).fetchone() is not None
+
     if existing is None:
-        conn.execute(
-            """INSERT INTO subscribers (chat_id, username, tier, expires_at, linked_at)
-               VALUES (?, ?, 'trial', ?, ?)""",
-            (chat_id, username, expires, time.time()),
-        )
-        until = time.strftime("%b %d, %Y", time.gmtime(expires))
-        message = (
-            f"✅ *Telegram linked to RustDeck!*\n\n"
-            f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
-            f"👀 Watch any wallet 24/7: send /watch 0x…\n"
-            f"(paste the FULL Hyperliquid address — works with any wallet)\n\n"
-            f"Commands: /prices — live prices, /status — subscription, /help — all."
-        )
+        if email_used:
+            conn.execute(
+                """INSERT INTO subscribers (chat_id, username, tier, expires_at, linked_at, email)
+                   VALUES (?, ?, 'free', ?, ?, ?)""",
+                (chat_id, username, time.time(), time.time(), email),
+            )
+            message = (
+                "✅ *Telegram linked to RustDeck!*\n\n"
+                "ℹ️ This email has already used the free trial on another Telegram account, "
+                "so the trial is not granted again.\n"
+                "Paid plans are coming soon — thanks for testing!"
+            )
+        else:
+            conn.execute(
+                """INSERT INTO subscribers (chat_id, username, tier, expires_at, linked_at, email)
+                   VALUES (?, ?, 'trial', ?, ?, ?)""",
+                (chat_id, username, expires, time.time(), email),
+            )
+            until = time.strftime("%b %d, %Y", time.gmtime(expires))
+            message = (
+                "✅ *Telegram linked to RustDeck!*\n\n"
+                + (f"📧 Account: *{email}*\n" if email else "")
+                + f"🎁 Free trial: *{TRIAL_DAYS} days* (until {until})\n\n"
+                "👀 Watch up to 5 wallets 24/7: send /watch 0x…\n"
+                "(paste the FULL Hyperliquid address — works with any wallet)\n\n"
+                "Commands: /prices — live prices, /status — subscription, /help — all."
+            )
     else:
+        if email:
+            conn.execute("UPDATE subscribers SET email=? WHERE chat_id=?", (email, chat_id))
         left_days = (existing["expires_at"] - time.time()) / 86400 if existing["expires_at"] else 0
         if left_days > 0:
             until = time.strftime("%b %d, %Y", time.gmtime(existing["expires_at"]))
@@ -474,7 +534,8 @@ def _cmd_watch(chat_id, username, text):
             "Usage: `/watch 0x4f2a…c3a9`\n\n"
             "Paste the *full Hyperliquid wallet address* (0x + 40 characters).\n"
             "Or just send the address as a message — I'll get it.\n"
-            "Works with *any* wallet — yours or any whale's.\n\n"
+            "Works with *any* wallet — yours or any whale's.\n"
+            f"Up to {WATCH_LIMIT} wallets per account.\n\n"
             "Included with your subscription (free trial: 7 days).",
         )
         return
@@ -485,30 +546,75 @@ def _cmd_watch(chat_id, username, text):
         conn.close()
         send_message(
             chat_id,
-            "First link your account: open rustdeck.app → “Connect Telegram” → send me the code.",
+            "First link your account: sign in on rustdeck.app → “Create link code” → send me `/link <code>`.",
         )
         return
-    conn.execute("UPDATE subscribers SET watched_wallet=? WHERE chat_id=?", (addr, chat_id))
+    current = _parse_watched(sub["watched_wallet"])
+    short = f"{addr[:10]}…{addr[-6:]}"
+    if addr in current:
+        conn.close()
+        send_message(chat_id, f"👀 Already watching `{short}`\n\nSee all: /watching")
+        return
+    if len(current) >= WATCH_LIMIT:
+        conn.close()
+        send_message(
+            chat_id,
+            f"⚠️ Watch limit reached ({WATCH_LIMIT} wallets).\n"
+            "Remove one first: `/unwatch 0x…`\n"
+            "See the list: /watching",
+        )
+        return
+    current.append(addr)
+    conn.execute("UPDATE subscribers SET watched_wallet=? WHERE chat_id=?", (",".join(current), chat_id))
     conn.commit()
     conn.close()
-    short = f"{addr[:10]}…{addr[-6:]}"
-    send_message(
-        chat_id,
-        f"👀 *Now watching* `{short}`\n\n"
-        f"You'll get a message here when the wallet:\n"
-        f"• opens or closes a position\n"
-        f"• gets liquidated\n"
-        f"• executes any fill (limits, TP/SL)\n\n"
-        f"Checks every minute, 24/7.\nStop: /unwatch",
+    lines = [f"👀 *Now watching ({len(current)}/{WATCH_LIMIT}):*"]
+    lines += [f"• `{a[:10]}…{a[-6:]}`" for a in current]
+    lines.append(
+        "\nYou'll get a message here when a wallet:\n"
+        "• opens or closes a position\n"
+        "• gets liquidated\n"
+        "• executes any fill (limits, TP/SL)\n\n"
+        "Checks every minute, 24/7.\n"
+        "See all: /watching · Stop one: `/unwatch 0x…` · Stop all: /unwatch"
     )
+    send_message(chat_id, "\n".join(lines))
 
 
-def _cmd_unwatch(chat_id):
+def _cmd_unwatch(chat_id, text=""):
+    """Без аргумента — стоп всем кошелькам. С адресом — убрать только его."""
+    parts = (text or "").split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+    if re.fullmatch(r"[0-9a-f]{40}", arg):
+        arg = "0x" + arg
+
     conn = _db()
+    sub = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+    current = _parse_watched(sub["watched_wallet"]) if sub else []
+
+    if arg and re.fullmatch(r"0x[0-9a-f]{40}", arg):
+        if arg not in current:
+            conn.close()
+            send_message(chat_id, f"Not watching `{arg[:10]}…{arg[-6:]}`. List: /watching")
+            return
+        current.remove(arg)
+        conn.execute(
+            "UPDATE subscribers SET watched_wallet=? WHERE chat_id=?",
+            (",".join(current) or None, chat_id),
+        )
+        conn.commit()
+        conn.close()
+        extra = f"\nStill watching {len(current)} — /watching" if current else ""
+        send_message(chat_id, f"✅ Stopped watching `{arg[:10]}…{arg[-6:]}`{extra}")
+        return
+
     conn.execute("UPDATE subscribers SET watched_wallet=NULL WHERE chat_id=?", (chat_id,))
     conn.commit()
     conn.close()
-    send_message(chat_id, "✅ Stopped watching. /watch 0x… to start again.")
+    if current:
+        send_message(chat_id, f"✅ Stopped watching all ({len(current)}). /watch 0x… to start again.")
+    else:
+        send_message(chat_id, "You weren't watching anything. /watch 0x… to start.")
 
 
 def _cmd_watching(chat_id):
@@ -517,11 +623,15 @@ def _cmd_watching(chat_id):
         "SELECT watched_wallet FROM subscribers WHERE chat_id=?", (chat_id,)
     ).fetchone()
     conn.close()
-    if sub and sub["watched_wallet"]:
-        a = sub["watched_wallet"]
-        send_message(chat_id, f"👀 Watching `{a[:10]}…{a[-6:]}`\nStop: /unwatch")
-    else:
+    addrs = _parse_watched(sub["watched_wallet"]) if sub else []
+    if not addrs:
         send_message(chat_id, "Not watching anything yet. /watch 0x… to start.")
+        return
+    lines = [f"👀 *Watching ({len(addrs)}/{WATCH_LIMIT}):*"]
+    for i, a in enumerate(addrs, 1):
+        lines.append(f"{i}. `{a[:10]}…{a[-6:]}`")
+    lines.append("\nStats: rustdeck.app\nRemove one: `/unwatch 0x…` · Stop all: /unwatch")
+    send_message(chat_id, "\n".join(lines))
 
 
 def _cmd_status(chat_id):
@@ -534,23 +644,46 @@ def _cmd_status(chat_id):
         send_message(
             chat_id,
             "📭 Your Telegram is not linked yet.\n"
-            "Open rustdeck.app → “Connect Telegram” in the sidebar.",
+            "Sign in on rustdeck.app → “Create link code” → send /link <code>.",
         )
         return
     left_days = (sub["expires_at"] - time.time()) / 86400 if sub["expires_at"] else 0
+    try:
+        email = sub["email"]
+    except (IndexError, KeyError):
+        email = None
+    email_line = f"📧 Account: *{email}*\n" if email else ""
     if left_days > 0:
         send_message(
             chat_id,
             f"💎 Plan: *{sub['tier']}*\n"
+            f"{email_line}"
             f"Days left: *{max(0, int(left_days)) + 1}*\n\n"
             f"More tools: rustdeck.app",
         )
     else:
         send_message(
             chat_id,
-            "⌛ Your free trial has ended.\n"
+            f"⌛ Your free trial has ended.\n"
+            f"{email_line}"
             "Paid plans are coming soon — for now everything stays free 🎁",
         )
+
+
+def _send_welcome(chat_id):
+    """Приветствие /start без целевого payload."""
+    send_message(
+        chat_id,
+        "⚡ *RustDeck* — trading tools for crypto traders\n\n"
+        "Wallet stats & market tools: rustdeck.app\n\n"
+        "To link your Telegram: sign in on the website → "
+        "“Create link code” → send me `/link <code>`.\nOr tap the button below 👇",
+        reply_markup={
+            "inline_keyboard": [[
+                {"text": "🎯 Open RustDeck", "url": "https://rustdeck.app"}
+            ]]
+        },
+    )
 
 
 def handle_update(update):
@@ -566,19 +699,18 @@ def handle_update(update):
         payload = parts[1].strip() if len(parts) > 1 else ""
         if re.fullmatch(r"/start \d{6}", text) or re.fullmatch(r"\d{6}", payload):
             _try_link(chat_id, username, payload)
+        elif payload.lower().startswith("watch"):
+            # Deep-link из Whale Feed / лидерборда: /start watch_0x…
+            addr = payload[5:].strip().lower().lstrip("_")
+            if re.fullmatch(r"[0-9a-f]{40}", addr):
+                addr = "0x" + addr
+            if re.fullmatch(r"0x[0-9a-f]{40}", addr):
+                send_message(chat_id, f"👀 Following `{addr[:10]}…{addr[-6:]}`")
+                _cmd_watch(chat_id, username, "/watch " + addr)
+            else:
+                _send_welcome(chat_id)
         else:
-            send_message(
-                chat_id,
-                "⚡ *RustDeck* — trading tools for crypto traders\n\n"
-                "Wallet stats & market tools: rustdeck.app\n\n"
-                "To link your Telegram: open the website → “Connect Telegram” → "
-                "send me the code.\nOr tap the button below 👇",
-                reply_markup={
-                    "inline_keyboard": [[
-                        {"text": "🎯 Open RustDeck", "url": "https://rustdeck.app"}
-                    ]]
-                },
-            )
+            _send_welcome(chat_id)
     elif text.startswith("/link"):
         parts = text.split(maxsplit=1)
         code = parts[1].strip() if len(parts) > 1 else ""
@@ -588,7 +720,7 @@ def handle_update(update):
             send_message(
                 chat_id,
                 "Format: `/link 123456`\n"
-                "Generate the code on the website: rustdeck.app → “Connect Telegram”.",
+                "Get the code on the website: rustdeck.app → Sign in → “Create link code”.",
             )
     elif text == "/prices":
         _cmd_prices(chat_id)
@@ -596,8 +728,8 @@ def handle_update(update):
         _cmd_top(chat_id)
     elif text.startswith("/watch") and not text.startswith("/watching"):
         _cmd_watch(chat_id, username, text)
-    elif text == "/unwatch":
-        _cmd_unwatch(chat_id)
+    elif text.startswith("/unwatch"):
+        _cmd_unwatch(chat_id, text)
     elif text == "/watching":
         _cmd_watching(chat_id)
     elif re.fullmatch(r"0x[0-9a-f]{40}", text.lower()) or re.fullmatch(r"[0-9a-f]{40}", text.lower()):
@@ -612,11 +744,12 @@ def handle_update(update):
             "/prices — live prices of top-5 coins\n"
             "/top — top-5 traders today (PnL)\n"
             "/watch 0x… — watch any Hyperliquid wallet 24/7\n"
-            "  (paste the FULL wallet address; works with any wallet)\n"
-            "/watching — what wallet is being watched\n"
-            "/unwatch — stop watching\n"
+            "  (paste the FULL wallet address; up to 5 wallets)\n"
+            "/watching — list your watched wallets\n"
+            "/unwatch [0x…] — stop one or all wallets\n"
             "/status — subscription status\n"
             "/link <code> — link your Telegram\n"
+            "  (code: rustdeck.app → Sign in → Create link code)\n"
             "/start — start over\n\n"
             "🎯 Website: rustdeck.app",
         )
