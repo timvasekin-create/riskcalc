@@ -1,11 +1,15 @@
 # ===== Render (один сервис на все домены) =====
 # Сервис riskcalc.onrender.com обслуживает:
-#   - calc.rustdeck.app → калькулятор (templates/index.html)
-#   - rustdeck.app (корень) → главная-хаб (app/index.html) — выбирается по Host-заголовку
+#   - rustdeck.app (корень) → главная-хаб (app/index.html)
+#   - rustdeck.app/<SEO-страница> → легаси-калькулятор (templates/index.html)
+#   - api.rustdeck.app → те же JSON-роуты (/api/*)
+#   - localhost / riskcalc.onrender.com → легаси-калькулятор (dev-фолбэк)
+# Выбор страницы для "/" — по Host-заголовку в main.py.
 #
-# DNS в Porkbun:
+# DNS в Porkbun (free-план Render: максимум 2 кастомных домена —
+# rustdeck.app + api.rustdeck.app; calc.rustdeck.app выведен):
 #   ALIAS (корень, Host пусто)  → riskcalc.onrender.com   → rustdeck.app
-#   CNAME  calc                 → riskcalc.onrender.com   → calc.rustdeck.app
+#   CNAME  api                  → riskcalc.onrender.com   → api.rustdeck.app
 # (A-запись НЕ использовать — у Render нет статического IP!)
 # Домены добавляются: Render Dashboard → сервис → Settings → Custom Domains.
 

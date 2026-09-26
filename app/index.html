@@ -714,7 +714,7 @@
                 <tr>
                     <td class="font-semibold">${esc(o.coin)}</td>
                     <td class="text-hyper-muted2">${esc(o.type)}${o.is_trigger ? ' ⚡' : ''}</td>
-                    <td class="text-hyper-muted2">${esc(o.side)}</td>
+                    <td class="text-hyper-muted2">${esc(o.side_label || o.side)}</td>
                     <td class="font-mono">${fmtPrice(o.price)}</td>
                     <td class="font-mono">${o.size}</td>
                     <td class="text-hyper-muted2">${o.reduce_only ? 'Yes' : '—'}</td>
@@ -742,7 +742,7 @@
                 const showPnl = t.closed_pnl !== 0;
                 return `<tr>
                     <td class="font-semibold">${esc(t.coin)}</td>
-                    <td class="text-hyper-muted2">${esc(t.dir || t.side || '—')}</td>
+                    <td class="text-hyper-muted2">${esc(t.dir || t.side_label || t.side || '—')}</td>
                     <td class="font-mono">${fmtPrice(t.px)}</td>
                     <td class="font-mono">${t.sz}</td>
                     <td class="font-mono ${showPnl ? pnlCls(t.closed_pnl) : 'text-hyper-muted'}">${showPnl ? pnlSign(t.closed_pnl) : '—'}</td>
@@ -994,7 +994,7 @@
                     return `<div class="whale-row" data-addr="${e.address}">
                         ${badge}
                         <span class="font-bold text-white">${esc(e.coin)}</span>
-                        <span class="text-hyper-muted2">${esc(e.dir || e.side)}</span>
+                        <span class="text-hyper-muted2">${esc(e.dir || e.side_label || e.side)}</span>
                         <span class="font-mono font-bold text-hyper-yellow">@ $${fmtCompact(e.notional)}</span>
                         <span class="text-hyper-muted font-mono text-[11px]">${shortAddr(e.address)}</span>
                         <a class="font-mono text-[11px] text-hyper-muted hover:text-hyper-teal ml-auto px-1" href="https://t.me/RustDeckcryptobot?start=watch_${e.address}" target="_blank" rel="noopener" title="Follow this whale in Telegram" onclick="event.stopPropagation()">👁 TG</a>
@@ -1767,7 +1767,7 @@
             (d.recent_trades || []).forEach(t => {
                 const key = t.time + '|' + t.coin + '|' + t.side + '|' + t.px + '|' + t.sz;
                 if (prevKeys.has(key)) return;
-                const dir = t.dir || t.side || '';
+                const dir = t.dir || t.side_label || t.side || '';
                 if (/liquidat/i.test(dir)) {
                     events.push({ type: 'liq', title: 'LIQUIDATION', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · PnL ${pnlSign(t.closed_pnl)}` });
                 } else if (t.closed_pnl !== 0) {
@@ -1808,12 +1808,12 @@
                 if (prevOrd[k]) return;
                 const o = nowOrd[k];
                 const kind = o.is_trigger ? 'Stop/TP order' : 'Limit order';
-                events.push({ type: 'order', title: '🧾 ' + kind, text: `${o.coin} ${o.side} · ${fmtPrice(o.size)} @ $${fmtPrice(o.price)}` });
+                events.push({ type: 'order', title: '🧾 ' + kind, text: `${o.coin} ${o.side_label || o.side} · ${fmtPrice(o.size)} @ $${fmtPrice(o.price)}` });
             });
             Object.keys(prevOrd).forEach(k => {
                 if (nowOrd[k]) return;
                 const o = prevOrd[k];
-                events.push({ type: 'order', title: '🗑 Order removed', text: `${o.coin} ${o.side} @ $${fmtPrice(o.price)}` });
+                events.push({ type: 'order', title: '🗑 Order removed', text: `${o.coin} ${o.side_label || o.side} @ $${fmtPrice(o.price)}` });
             });
             return events;
         }
@@ -1915,7 +1915,7 @@
                 const j = await r.json();
                 const rows = [['coin', 'action', 'side', 'price', 'size', 'closed_pnl', 'fee', 'time_utc']];
                 (j.fills || []).forEach(f => rows.push([
-                    f.coin, f.dir || '', f.side || '', f.px, f.sz, f.closed_pnl, f.fee,
+                    f.coin, f.dir || '', f.side_label || f.side || '', f.px, f.sz, f.closed_pnl, f.fee,
                     f.time ? new Date(f.time).toISOString() : ''
                 ]));
                 const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');

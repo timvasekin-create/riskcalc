@@ -25,9 +25,10 @@ async def head_root():
     return Response(status_code=200)
 
 # ===== SEO-роуты =====
-# Корень " /": если домен rustdeck.app (корневой) — отдаём ГЛАВНУЮ-ХАБ,
-# если calc.rustdeck.app / localhost / onrender — калькулятор.
-# Так один сервис обслуживает оба домена, второй сервис Render не нужен.
+# Корень " /": домен rustdeck.app → ГЛАВНАЯ-ХАБ, прочие хосты (localhost,
+# riskcalc.onrender.com, служебный calc.*) → легаси-калькулятор.
+# calc.rustdeck.app выведен из DNS (на free-плане Render только 2 домена:
+# rustdeck.app + api.rustdeck.app) — роутинг оставлен как dev-фолбэк.
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     host = (request.headers.get("host") or "").lower().split(":")[0]
@@ -273,6 +274,17 @@ def _pnl_since(closed_trades: list, since_ms: float) -> float:
     return round(sum(t["pnl"] for t in closed_trades if t["time"] >= since_ms), 2)
 
 
+def _side_label(side) -> str:
+    """HL отдаёт сторону как A (ask/продажа) или B (bid/покупка) —
+    в интерфейсе показываем привычные Long/Short."""
+    s = (side or "").strip().upper()
+    if s in ("A", "ASK", "SELL", "S"):
+        return "Short"
+    if s in ("B", "BID", "BUY", "L"):
+        return "Long"
+    return side or "—"
+
+
 def _rustdeck_score(n_closed, win_rate, profit_factor, avg_win, avg_loss, base_value, max_dd):
     """RustDeck Score 0-100 и грейд S/A/B/C/D.
     win rate 30 + profit factor 25 + avg win/loss 20 + просадка 25."""
@@ -386,6 +398,7 @@ async def api_wallet(address: str):
             open_orders.append({
                 "coin": o.get("coin"),
                 "side": o.get("side"),
+                "side_label": _side_label(o.get("side")),
                 "size": float(o.get("origSz") or o.get("sz") or 0),
                 "type": o.get("orderType") or ("Trigger" if o.get("isTrigger") else "Limit"),
                 "price": float(o.get("limitPx") or o.get("triggerPx") or 0),
@@ -429,6 +442,7 @@ async def api_wallet(address: str):
             "coin": f.get("coin"),
             "dir": f.get("dir"),
             "side": f.get("side"),
+            "side_label": _side_label(f.get("side")),
             "px": float(f.get("px") or 0),
             "sz": float(f.get("sz") or 0),
             "closed_pnl": round(float(f.get("closedPnl") or 0), 2),
@@ -636,6 +650,7 @@ async def api_fills(address: str, limit: int = 200):
             "coin": f.get("coin"),
             "dir": f.get("dir"),
             "side": f.get("side"),
+            "side_label": _side_label(f.get("side")),
             "px": float(f.get("px") or 0),
             "sz": float(f.get("sz") or 0),
             "closed_pnl": round(float(f.get("closedPnl") or 0), 2),
@@ -905,6 +920,7 @@ def _whale_refresh_loop():
                         "coin": f.get("coin"),
                         "dir": f.get("dir"),
                         "side": f.get("side"),
+                        "side_label": _side_label(f.get("side")),
                         "notional": round(notional, 0),
                         "px": float(f.get("px") or 0),
                         "pnl": round(pnl, 2),

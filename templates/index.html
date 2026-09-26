@@ -9,7 +9,7 @@
     <title>RustDeck — Free Crypto Risk & Position Size Calculator</title>
     <meta name="description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures. Free tool for Bybit, Hyperliquid, and Binance traders.">
     <meta name="keywords" content="crypto risk calculator, position size calculator crypto, bitcoin risk calculator, bybit position size calculator, hyperliquid calculator">
-    <link rel="canonical" href="https://calc.rustdeck.app/">
+    <link rel="canonical" href="https://rustdeck.app/">
 
     <meta property="og:title" content="Free Crypto Risk & Position Size Calculator">
     <meta property="og:description" content="Calculate exact position size, margin, and risk for Bitcoin and crypto futures.">
@@ -603,6 +603,10 @@
             };
             setMeta('description', meta.desc);
             setMeta('keywords', meta.keywords);
+            // canonical всегда на основном домене (calc.* выведен из DNS)
+            let link = document.querySelector('link[rel="canonical"]');
+            if (!link) { link = document.createElement('link'); link.setAttribute('rel', 'canonical'); document.head.appendChild(link); }
+            link.setAttribute('href', 'https://rustdeck.app' + (path === '/' ? '/' : path));
         })();
 
         // ===== Активы =====

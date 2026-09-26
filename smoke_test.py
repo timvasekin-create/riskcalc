@@ -294,6 +294,11 @@ try:
         assert _bot._fmt_small(84250.5) == "84,250.50", f"_fmt_small(84250.5) = {_bot._fmt_small(84250.5)}"
         log("FMT OK: мелкие числа с 6 значащими цифрами (0.004362), крупные — с запятыми")
 
+        # Сторона сделки: HL отдаёт A/B (ask/bid) — в интерфейсе должно быть Long/Short
+        assert _bot._side_label("A") == "Short" and _bot._side_label("B") == "Long", "A/B не превращаются в Short/Long"
+        assert _bot._side_label("b") == "Long" and _bot._side_label("") == "—", "регистр/пустое значение обрабатываются неверно"
+        log("SIDE OK: A/B → Short/Long")
+
         # /watch: привязка кошелька к подписке + /unwatch (адрес нормализуется в lowercase)
         _bot._cmd_watch(777000, 'tester', '/watch 0x000000000000000000000000000000000000dEaD')
         conn = _bot._db()

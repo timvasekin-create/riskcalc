@@ -7,11 +7,13 @@ RustDeck — набор бесплатных инструментов для к�
 калькулятор размера позиции и риска (при срабатывании стопа трейдер теряет ровно
 заложенную сумму: $5, $10, $50, 1% и т.д.).
 
-Домены (план):
-- **rustdeck.app** (корень) — главная-хаб экосистемы (app/index.html)
-- **calc.rustdeck.app** — калькулятор (продакшн, живой)
-- **trade.rustdeck.app** — будущий трекер сделок / статистика кошелька
-- **blog.rustdeck.app** — будущий блог
+Домены (free-план Render: максимум 2 кастомных домена):
+- **rustdeck.app** (корень) — главная-хаб экосистемы (app/index.html) + встроенный
+  калькулятор позиций; легаси-калькулятор живёт на SEO-путях того же домена
+  (/bitcoin-risk-calculator, /hyperliquid-calculator и т.д.)
+- **api.rustdeck.app** — те же JSON-роуты (/api/*) для внешних интеграций
+- calc.rustdeck.app — ВЫВЕДЕН (домен в Render и CNAME в Porkbun удалены)
+- trade.rustdeck.app / blog.rustdeck.app — будущие проекты (понадобится апгрейд плана)
 - riskcalc.onrender.com — старый адрес, живой
 - Репозиторий: https://github.com/timvasekin-create/riskcalc
 - Хостинг: Render (Free), DNS: Porkbun → Cloudflare → Render, UptimeRobot пингует каждые 5 мин
@@ -71,8 +73,9 @@ riskcalc/
   * FUNDING RATES: топ-8highest/lowest по ставке HL, /api/funding.
     ВАЖНО: predictedFundings возвращает список кортежей [coin, [[exchange, {...}],...]],
     биржа называется "HlPerp", fundingRate за fundingIntervalHours!
-  * Telegram CTA + roadmap-плитки. Калькулятор с главной УБРАН (не мейн-функция,
-    живёт тихо на calc.rustdeck.app)
+  * Telegram CTA + roadmap-плитки. Тогда калькулятор с главной убирали — теперь он
+    вернулся встроенным в хаб (#calc), а легаси-калькулятор живёт на SEO-путях
+    rustdeck.app (calc.* выведен из DNS)
   * LIVE ALERTS (браузер): тумблер запрашивает разрешение на Notifications, звук через
     WebAudio (низкий тон = убыток/ликвидация), тумблеры событий (open/close/liquidation/
     any fill/sound), лента событий. Опрос /api/wallet каждые 25с, diff состояний.
@@ -120,7 +123,7 @@ riskcalc/
     зелёный/красный по знаку; карточка скрывается, если < 2 точек данных.
   * WIN RATE карточка: + Profit Factor (∞ когда нет убытков) и Avg win / Avg loss.
 - Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
-  calc.rustdeck.app/localhost → калькулятор
+  localhost/onrender/calc.* (dev-фолбэк) → легаси-калькулятор
 - /score/{address} — публичная карточка RustDeck Score (noindex + OG-теги) для шаринга в TG/X
 - smoke_test.py — все роуты, host-роутинг, /api/wallet (+pnl_charts/value_charts/perp_chart/
   profit_factor/score/streaks/max_drawdown_usd), /api/funding, /api/markets, /api/fills,
@@ -169,8 +172,8 @@ take_profit (может быть авторассчитан по R:R), leverage 
    BTC bc1qdcczgt55v9lqcdmc3pxdm40tgqm2psqmtq3nft (QR-модалка)
 
 ## SEO
-- Google Search Console: riskcalc.onrender.com подтверждён; calc.rustdeck.app — подтвердить
-  (meta google-site-verification в index.html)
+- Google Search Console: riskcalc.onrender.com подтверждён; rustdeck.app — подтвердить
+  (meta google-site-verification в index.html; canonical теперь всегда на rustdeck.app)
 - Один HTML на все страницы, title/description подменяются JS по pathname (объект SEO)
 - Т ЦА: крипто-трейдеры США, фьючерсы Hyperliquid/Bybit/Binance, плечо 5–50x
 
@@ -180,9 +183,9 @@ take_profit (может быть авторассчитан по R:R), leverage 
 3. ✅ Главная-хаб rustdeck.app (app/index.html): карточки инструментов, ссылки на поддомены
 4. ✅ Host-роутинг: ОДИН сервис riskcalc.onrender.com отдаёт и хаб, и калькулятор
    (main.py смотрит на Host-заголовок: rustdeck.app → хаб, calc./localhost → калькулятор)
-5. 🔄 Домены: Render Dashboard → сервис → Settings → Custom Domains → добавить
-   rustdeck.app и www.rustdeck.app (calc.rustdeck.app уже добавлен).
-   DNS Porkbun: ALIAS корень → riskcalc.onrender.com; CNAME calc → riskcalc.onrender.com
+5. 🔄 Домены: rustdeck.app + api.rustdeck.app (лимит free-плана — 2 кастомных домена).
+   calc.rustdeck.app УБРАН (домен в Render + CNAME в Porkbun удалены).
+   DNS Porkbun: ALIAS корень → riskcalc.onrender.com; CNAME api → riskcalc.onrender.com
    (A-запись НЕ использовать — у Render нет статического IP; Blueprint НЕ нужен)
 6. trade.rustdeck.app — трекер сделок по кошельку Hyperliquid (публичный API HL,
    чтение fill'ов: win rate, avg R:R, история) + бэкенд /api/wallet/{address}.
@@ -234,6 +237,10 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   без Markdown, если Telegram отклонил разметку. Мост «сайт → TG»: при включении Live
   Alerts хаб вызывает POST /api/tg/watch {chat_id, wallet} → bot.add_watch() добавляет
   кошелёк в слежение (лимит 5, дедуп) и бот пишет «👀 Website: now watching…».
+- Сторона сделки больше не «A/B» (в HL это Ask/Bid): API отдаёт side_label
+  (A → Short, B → Long), лента/таблицы/CSV на сайте и сообщения бота показывают Long/Short.
+- Бот: WATCH_INTERVAL = 20 секунд вместо 60 — уведомления приходят почти мгновенно
+  (в /watch текст «Checks every {WATCH_INTERVAL} seconds»).
 - АВТОРИЗАЦИЯ: Google OAuth 2.0 (stdlib): /auth/google → Google → /auth/google/callback
   → cookie `rd_session` (HMAC-подпись, 30 дней) → GET /api/me отдаёт email/имя и
   привязанный TG. POST /api/logout. Кнопка «Continue with Google» в auth-модалке;

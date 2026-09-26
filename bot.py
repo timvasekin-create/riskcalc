@@ -39,6 +39,7 @@ TRIAL_DAYS = 7          # пробный период при привязке
 CODE_TTL = 15 * 60      # код привязки живёт 15 минут
 WATCH_LIMIT = 5         # максимум кошельков на аккаунт (мульти-/watch)
 ALERT_LIMIT = 10        # максимум ценовых алертов на аккаунт (/alert)
+WATCH_INTERVAL = 20     # секунд между опросами кошельков (короче — быстрее уведы)
 
 _db_lock = threading.Lock()
 _bot_username_cache = {"name": None, "ts": 0.0}
@@ -137,6 +138,17 @@ def _fmt_small(v):
     if a >= 1000:
         return f"{v:,.2f}"
     return f"{v:g}"
+
+
+def _side_label(side):
+    """HL отдаёт сторону как A (ask/продажа) или B (bid/покупка) —
+    в сообщениях показываем привычные Long/Short."""
+    s = (side or "").strip().upper()
+    if s in ("A", "ASK", "SELL", "S"):
+        return "Short"
+    if s in ("B", "BID", "BUY", "L"):
+        return "Long"
+    return side or "—"
 
 
 def get_bot_username():
@@ -241,6 +253,9 @@ def _wallet_snapshot(addr):
         fill_keys.add(
             f"{f.get('time')}|{f.get('coin')}|{f.get('side')}|{f.get('px')}|{f.get('sz')}"
         )
+    # Свежие филлы кладём в снимок: цикл слежения не делает повторный запрос
+    # (меньше вызовов HL → быстрее реакция и меньше шансов на rate limit)
+    recent_fills = sorted(fills or [], key=lambda x: x.get("time") or 0, reverse=True)[:20]
     # Открытые ордера (лимитки, TP/SL) — для уведомлений о появлении/снятии
     orders = {}
     try:
@@ -249,13 +264,14 @@ def _wallet_snapshot(addr):
             orders[k] = {
                 "coin": o.get("coin"),
                 "side": o.get("side"),
+                "side_label": _side_label(o.get("side")),
                 "px": float(o.get("limitPx") or o.get("triggerPx") or 0),
                 "sz": float(o.get("sz") or 0),
                 "is_trigger": bool(o.get("isTrigger")),
             }
     except Exception:
         pass
-    return {"positions": positions, "fill_keys": fill_keys, "orders": orders}
+    return {"positions": positions, "fill_keys": fill_keys, "orders": orders, "fills": recent_fills}
 
 
 def _parse_watched(raw):
@@ -361,11 +377,8 @@ def _watch_loop():
                     continue  # первый опрос — фиксируем базу
 
                 events = []
-                try:
-                    fills = _hl_post({"type": "userFills", "user": addr})
-                except Exception:
-                    fills = []
-                for f in sorted(fills or [], key=lambda x: x.get("time") or 0, reverse=True)[:20]:
+                fills = snap.get("fills") or []
+                for f in sorted(fills, key=lambda x: x.get("time") or 0, reverse=True)[:20]:
                     key = f"{f.get('time')}|{f.get('coin')}|{f.get('side')}|{f.get('px')}|{f.get('sz')}"
                     if key in prev["fill_keys"]:
                         continue
@@ -375,7 +388,7 @@ def _watch_loop():
                         sz = float(f.get("sz") or 0)
                     except (TypeError, ValueError):
                         continue
-                    dir_s = f.get("dir") or f.get("side") or ""
+                    dir_s = f.get("dir") or _side_label(f.get("side"))
                     if "iquidat" in dir_s:
                         events.append(f"💥 *LIQUIDATION:* {f.get('coin')} {dir_s} @ ${_fmt_small(px)} · PnL ${pnl:+,.2f}")
                     elif pnl != 0:
@@ -401,11 +414,13 @@ def _watch_loop():
                     if k in prev_o or any(o["coin"] in e for e in events):
                         continue
                     kind = "Stop/TP order" if o["is_trigger"] else "Limit order"
-                    events.append(f"🧾 *{kind}:* {o['coin']} {o['side']} · {_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}")
+                    side_s = o.get("side_label") or o["side"]
+                    events.append(f"🧾 *{kind}:* {o['coin']} {side_s} · {_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}")
                 for k, o in prev_o.items():
                     if k in now_o or any(o["coin"] in e for e in events):
                         continue
-                    events.append(f"🗑 *Order removed:* {o['coin']} {o['side']} @ ${_fmt_small(o['px'])}")
+                    side_s = o.get("side_label") or o["side"]
+                    events.append(f"🗑 *Order removed:* {o['coin']} {side_s} @ ${_fmt_small(o['px'])}")
 
                 for ev in events:
                     for cid in chat_ids:
@@ -439,7 +454,7 @@ def _watch_loop():
                 pass
         except Exception:
             pass
-        time.sleep(60)
+        time.sleep(WATCH_INTERVAL)
 
 
 # ============================================================
@@ -831,7 +846,7 @@ def _cmd_watch(chat_id, username, text):
         "• opens or closes a position\n"
         "• gets liquidated\n"
         "• executes any fill (limits, TP/SL)\n\n"
-        "Checks every minute, 24/7.\n"
+        f"Checks every {WATCH_INTERVAL} seconds, 24/7.\n"
         "See all: /watching · Stop one: `/unwatch 0x…` · Stop all: /unwatch"
     )
     send_message(chat_id, "\n".join(lines))
