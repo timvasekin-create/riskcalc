@@ -29,6 +29,12 @@ services:
       # Токен Telegram-бота задаётся ВРУЧНУЮ в Render Dashboard → Environment
       - key: BOT_TOKEN
         sync: false
+      # Внешний бэкап состояния бота (SQLite): Render Free обнуляет диск при
+      # каждом деплое/спин-дауне → «сбрасывались» кошельки и подписки.
+      # GitHub → Settings → Developer settings → токен с правом `gist` → сюда.
+      # Гист создаётся сам (приватный, описание 'rustdeck-state').
+      - key: STATE_GITHUB_TOKEN
+        sync: false
       # Google OAuth: Google Cloud Console → Credentials → OAuth client ID
       # (Authorized redirect URI: https://rustdeck.app/auth/google/callback)
       - key: GOOGLE_CLIENT_ID

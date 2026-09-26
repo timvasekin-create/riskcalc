@@ -321,6 +321,29 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   сравниваются по oid — частичное исполнение больше не даёт ложных
   «сняли + поставили заново». Тост на сайте многострочный (лента — одной строкой).
 
+## ПОЧЕМУ «СБРАСЫВАЛСЯ КОШЕЛЁК» И КАК ЭТО ИСПРАВЛЕНО
+
+Причина: у Render Free диск эфемерный — **каждый деплой (и спин-даун) создаёт
+контейнер с пустой `rustdeck.db`**. Отсюда «/watching → Not watching anything»,
+сброс подписок и алертов сразу после пуша/редеплоя.
+
+Решение — `state_store.py` (новая зависимость-ноль, только stdlib):
+* раз в ~20 с, если база изменилась, и раз в 10 мин (heartbeat) консистентный
+  снимок базы (`sqlite3.backup()` → gzip → base64) уезжает в ПРИВАТНЫЙ
+  GitHub Gist (`rustdeck.db.gz.b64`, описание `rustdeck-state`);
+* на старте, если локальная база пустая (свежий контейнер),
+  `restore_if_empty()` подтягивает снимок — слежка/подписка/алерты возвращаются;
+* всё выключено, если нет `STATE_GITHUB_TOKEN` (тогда поведение как раньше).
+
+Настройка (2 минуты, бесплатно): GitHub → Settings → Developer settings →
+Personal access tokens → токен с правом `gist` → Render → сервис `rustdeck-calc`
+→ Environment → `STATE_GITHUB_TOKEN` = токен. Гист создаётся сам, приватный;
+`STATE_GIST_ID` указывать не нужно.
+
+Индикация: в админке (`/admin`) рядом с почтой чип `state: backup HH:MM:SS`
+(или `state: local only — set STATE_GITHUB_TOKEN` / `state: backup error`);
+в боте — строка `🗄 Backup:` в `/status`; в `/admin/users` есть поле `state`.
+
 ## КАК НАСТРОИТЬ GOOGLE SIGN-IN (5 минут)
 1. console.cloud.google.com → New Project (rustdeck) → APIs & Services → OAuth consent
    screen: External, название RustDeck, support email; Scopes: только

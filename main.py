@@ -6,6 +6,7 @@ import os
 
 # ===== Telegram-бот (фоновый поток, не мешает сайту) =====
 import bot as tg_bot
+import state_store            # внешний бэкап состояния (Render Free обнуляет диск)
 
 app = FastAPI(
     title="RustDeck — Crypto Trading Tools",
@@ -13,7 +14,21 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# Порядок важен: сначала пробуем восстановить базу из внешнего снимка (свежий
+# контейнер после деплоя), затем создаём таблицы и включаем авто-бэкап.
+try:
+    if state_store.restore_if_empty(tg_bot.DB_PATH):
+        print("[state] база восстановлена из внешнего снимка (gist)")
+except Exception as _e:
+    print("[state] restore failed:", repr(_e))
+
 BOT_ENABLED = tg_bot.start_bot_thread()
+
+try:
+    if state_store.start_sync_loop(tg_bot.DB_PATH):
+        print("[state] авто-бэкап включён (GitHub gist)")
+except Exception as _e:
+    print("[state] sync loop failed:", repr(_e))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "templates", "index.html")
@@ -1548,6 +1563,7 @@ body { margin:0; background:#0a0e13; color:#eaecef; font-family:Inter,Arial,sans
 .brand { font-weight:800; font-size:18px; letter-spacing:-0.01em; }
 .brand span.t { color:#50d2c1; } .brand span.m { color:#5c6670; font-weight:500; font-size:13px; }
 .chip { font-size:11px; font-family:monospace; color:#8b96a3; background:#0f1419; border:1px solid #1e252e; border-radius:999px; padding:5px 11px; }
+.chip.bad { color:#f6465d; border-color:rgba(246,70,93,.45); }
 .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
 .card { background:#0f1419; border:1px solid #1e252e; border-radius:12px; padding:14px; }
 .card b { display:block; font-size:22px; font-weight:800; }
@@ -1583,6 +1599,7 @@ _ADMIN_HTML_BODY = """
     <div class="brand">⚡ Rust<span class="t">Deck</span> <span class="m">admin · users &amp; subscriptions</span></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <span class="chip">%%EMAIL%%</span>
+      <span class="chip" id="stateChip">state: —</span>
       <button onclick="load()">⟳ Refresh</button>
       <button onclick="logout()">Sign out</button>
     </div>
@@ -1608,12 +1625,27 @@ function toast(msg, bad){
   t.style.display = 'block';
   setTimeout(() => { t.style.display = 'none'; }, 3200);
 }
+function renderState(st){
+  // Показываем, защищены ли данные от деплоя (Render Free обнуляет диск)
+  const el = document.getElementById('stateChip');
+  if (!el) return;
+  if (!st || !st.configured){
+    el.textContent = 'state: local only — set STATE_GITHUB_TOKEN';
+    el.classList.add('bad');
+    return;
+  }
+  const t = st.last_push ? new Date(st.last_push * 1000).toLocaleTimeString('en-US', {hour12:false}) : '—';
+  el.textContent = (st.last_error ? 'state: backup error' : 'state: backup ' + t);
+  el.title = st.last_error || ('gist ' + (st.gist_id || '—') + ' · ' + (st.pushed_bytes || 0) + ' bytes');
+  el.classList.toggle('bad', !!st.last_error);
+}
 async function load(){
   try {
     const r = await fetch('/admin/users');
     if (!r.ok) { toast('Access denied', true); return; }
     const j = await r.json();
     USERS = j.users || [];
+    renderState(j.state);
     render();
   } catch(e) { toast('Network error', true); }
 }
@@ -1690,12 +1722,14 @@ async def admin_home(request: Request):
 
 @app.get("/admin/users")
 async def admin_users(request: Request):
-    """Список аккаунтов: TG-юзер, почта, кошелёк, подписка, счётчики."""
+    """Список аккаунтов: TG-юзер, почта, кошелёк, подписка, счётчики.
+    Плюс состояние авто-бэкапа — видно, защищены ли данные от деплоя."""
     sess = admin_session(request)
     if not sess:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     users = tg_bot.list_users() if BOT_ENABLED else []
-    return {"updated": int(_time.time()), "admin": sess[0], "users": users}
+    return {"updated": int(_time.time()), "admin": sess[0], "users": users,
+            "state": state_store.status()}
 
 @app.post("/admin/add_days")
 async def admin_add_days(data: AddDaysInput, request: Request):

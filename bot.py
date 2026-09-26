@@ -1254,20 +1254,37 @@ def _cmd_status(chat_id):
     except (IndexError, KeyError):
         email = None
     email_line = f"📧 Account: *{email}*\n" if email else ""
+    # Строка о бэкапе: видно, что слежка/подписка не потеряются при деплое
+    # (Render Free обнуляет диск → данные храним во внешнем снимке)
+    backup_line = ""
+    try:
+        import state_store
+        st = state_store.status()
+        if st.get("configured"):
+            when = time.strftime("%H:%M", time.gmtime(st["last_push"])) if st.get("last_push") else "—"
+            backup_line = f"\n\n🗄 Backup: GitHub gist · last sync {when} UTC"
+            if st.get("last_error"):
+                backup_line += "\n⚠️ Last backup failed — check the token!"
+        else:
+            backup_line = "\n\n🗄 Backup: off — state can reset on redeploy"
+    except Exception:
+        backup_line = ""
     if left_days > 0:
         send_message(
             chat_id,
             f"💎 Plan: *{sub['tier']}*\n"
             f"{email_line}"
             f"Days left: *{max(0, int(left_days)) + 1}*\n\n"
-            f"More tools: rustdeck.app",
+            f"More tools: rustdeck.app"
+            f"{backup_line}",
         )
     else:
         send_message(
             chat_id,
             f"⌛ Your free trial has ended.\n"
             f"{email_line}"
-            "Paid plans are coming soon — for now everything stays free 🎁",
+            "Paid plans are coming soon — for now everything stays free 🎁"
+            f"{backup_line}",
         )
 
 

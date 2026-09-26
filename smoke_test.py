@@ -360,11 +360,52 @@ try:
             if not ok:
                 fails += 1
             log(f"{'OK ' if ok else 'FAIL'} TG start (с сессией): {e.code} (ожидаемо 503 без токена бота)")
+
+        # Админка (ADMIN_EMAILS по умолчанию — владелец): отдаёт юзеров
+        # и состояние авто-бэкапа (видно, защищены ли данные от деплоя)
+        admin_token = _main.make_session("ila281510@gmail.com", "Admin")
+        rq = urllib.request.Request(BASE + "/admin/users",
+                                    headers={"Cookie": "rd_session=" + admin_token})
+        with urllib.request.urlopen(rq, timeout=10) as r:
+            aj = json.loads(r.read().decode("utf-8", "replace"))
+        assert "state" in aj and "users" in aj, f"/admin/users без state/users: {str(aj)[:160]}"
+        log("ADMIN STATE OK: /admin/users отдаёт список юзеров и состояние авто-бэкапа")
     except AssertionError as e:
         fails += 1
         log("SECURITY FAIL:", str(e))
     except Exception as e:
         log("SECURITY WARN:", repr(e))
+    # ===== Внешний бэкап состояния: снимок базы и «выключено без токена» =====
+    try:
+        import state_store as _ss
+        import gzip as _gz
+        import sqlite3 as _sq
+        import tempfile as _tf
+        st = _ss.status()
+        for key in ("configured", "gist_id", "last_push", "last_pull", "last_error", "pushed_bytes"):
+            assert key in st, f"state_store.status() без поля {key}: {st}"
+        tmp_db = os.path.join(_tf.gettempdir(), "rd_state_smoke.db")
+        if os.path.exists(tmp_db):
+            os.remove(tmp_db)
+        assert _ss.db_is_empty(tmp_db) is True, "отсутствующая база должна считаться пустой"
+        _conn = _sq.connect(tmp_db)
+        _conn.execute("CREATE TABLE subscribers (chat_id INTEGER)")
+        _conn.execute("INSERT INTO subscribers VALUES (1)")
+        _conn.commit()
+        _conn.close()
+        assert _ss.db_is_empty(tmp_db) is False, "база с данными не должна считаться пустой"
+        snap = _ss.snapshot_bytes(tmp_db)
+        assert snap and _gz.decompress(snap).startswith(b"SQLite format 3"), "снимок базы не валиден"
+        assert _ss.push(tmp_db, force=True) is False, "без STATE_GITHUB_TOKEN отправка должна быть выключена"
+        assert _ss.start_sync_loop(tmp_db) is False, "без токена фоновый бэкап не стартует"
+        os.remove(tmp_db)
+        log("STATE BACKUP OK: снимок SQLite валиден, без токена авто-бэкап выключен")
+    except AssertionError as e:
+        fails += 1
+        log("STATE BACKUP FAIL:", str(e))
+    except Exception as e:
+        log("STATE BACKUP WARN:", repr(e))
+
     # ===== Рейт-лимитер (защита квоты Hyperliquid) =====
     try:
         import main as _main_lim
