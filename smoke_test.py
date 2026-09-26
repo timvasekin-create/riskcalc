@@ -2,12 +2,17 @@
 # Быстрый smoke-тест: сервер + все роуты, результат в smoke_out.txt
 import subprocess, sys, time, json, urllib.request, os
 
+# Один и тот же APP_SECRET у сервера и у теста — чтобы можно было подписывать
+# сессионную cookie и проверять авторизованные роуты без Google.
+os.environ.setdefault("APP_SECRET", "smoke-test-app-secret")
+_env = dict(os.environ)
+
 if os.path.exists("smoke_out.txt"):
     os.remove("smoke_out.txt")
 
 BASE = "http://127.0.0.1:8779"
 proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--port", "8779"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=_env)
 
 out = open("smoke_out.txt", "w", encoding="utf-8")
 def log(*a):
@@ -56,10 +61,23 @@ try:
     try:
         status, body = get("/api/prices", timeout=15)
         prices = json.loads(body)
-        log("PRICES:", json.dumps(prices, ensure_ascii=False)[:600])
-        log(f"PRICES: {len(prices.get('prices', []))} монет" if prices.get("prices") else "PRICES WARN: пусто (нет сети/регион)")
+        log("PRICES:", json.dumps(prices, ensure_ascii=False)[:400])
+        plist = prices.get("prices", [])
+        log(f"PRICES: {len(plist)} монет (в ответе count={prices.get('count')})")
+        # Требуем не только цену, но и 24ч-% по всем монетам тикера — это была
+        # главная жалоба: BTC/ETH/SOL/BNB показывали «—» вместо процентов.
+        by_sym = {p["symbol"]: p for p in plist}
+        missing = [s for s in ("BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "DOGE") if s not in by_sym]
+        assert not missing, f"нет монет тикера: {missing}"
+        no_change = [s for s in ("BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "DOGE")
+                     if by_sym[s].get("change24h") is None]
+        assert not no_change, f"нет 24ч-% у: {no_change}"
+        assert len(plist) >= 50, f"в списке цен мало монет: {len(plist)}"
+        assert by_sym["USDC"]["price"] == 1.0, "USDC должен быть ровно $1 (конвертер)"
+        log("PRICES OK: 24ч-% есть у всех монет тикера, список большой (Hyperliquid + добор)")
     except Exception as e:
-        log("PRICES WARN:", repr(e))
+        fails += 1
+        log("PRICES FAIL:", repr(e))
 
     # Telegram link API: локально без BOT_TOKEN ждём 503 (bot_disabled)
     try:
@@ -69,12 +87,18 @@ try:
         log(f"TG status endpoint: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG status endpoint: {e.code} — ПРОВЕРИТЬ")
     except Exception as e:
         log("TG status WARN:", repr(e))
+    # Выпуск кода привязки — только с Google-сессией: иначе чужой мог бы
+    # выпустить код на чужую почту. Без сессии ждём 401.
     try:
         req = urllib.request.Request(BASE + "/api/tg/link/start", data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=8) as r:
-            log(f"TG start endpoint: {r.status} (бот включён?)")
+            fails += 1
+            log(f"FAIL TG start endpoint: {r.status} без сессии (ожидаем 401)")
     except urllib.error.HTTPError as e:
-        log(f"TG start endpoint: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG start endpoint: {e.code} — ПРОВЕРИТЬ")
+        ok = e.code == 401
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} TG start endpoint: {e.code} без сессии (ожидаемо 401)")
     except Exception as e:
         log("TG start WARN:", repr(e))
 
@@ -106,7 +130,7 @@ try:
         fails += 1
         log("ME API FAIL:", repr(e))
 
-    # Мост «сайт → TG»: локально без BOT_TOKEN ждём 503
+    # Мост «сайт → TG»: без сессии 401 (чужой не добавит кошелёк в любой чат)
     try:
         req = urllib.request.Request(
             BASE + "/api/tg/watch",
@@ -114,36 +138,60 @@ try:
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with urllib.request.urlopen(req, timeout=8) as r:
-            log(f"TG watch bridge: {r.status} (бот включён?)")
+            fails += 1
+            log(f"FAIL TG watch bridge: {r.status} без сессии (ожидаем 401)")
     except urllib.error.HTTPError as e:
-        log(f"TG watch bridge: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG watch bridge: {e.code} — ПРОВЕРИТЬ")
+        ok = e.code == 401
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} TG watch bridge: {e.code} без сессии (ожидаемо 401)")
     except Exception as e:
         log("TG watch bridge WARN:", repr(e))
 
-    # api.rustdeck.app — закрытый домен: гостю только экран входа, API закрыт
+    # api.rustdeck.app — «невидимый» домен: страницы не отдаются вообще
+    # (пустой 404 без тела), а /api/* продолжает работать.
     try:
         req = urllib.request.Request(BASE + "/", headers={"Host": "api.rustdeck.app"})
         with urllib.request.urlopen(req, timeout=8) as r:
-            body = r.read().decode("utf-8", "replace")
-        ok = r.status == 200 and "restricted" in body and "Sign in with Google" in body
+            fails += 1
+            log(f"FAIL API HOST /: {r.status}, отдан контент (ожидаем пустой 404)")
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        robots_tag = e.headers.get("X-Robots-Tag", "")
+        ok = e.code == 404 and not body and robots_tag.startswith("noindex")
         if not ok:
             fails += 1
-        log(f"{'OK ' if ok else 'FAIL'} API HOST /: {r.status} — экран входа (админка закрыта)")
+        log(f"{'OK ' if ok else 'FAIL'} API HOST /: {e.code}, тело {len(body)} байт, X-Robots-Tag='{robots_tag}' (ожидаем пустой 404 + noindex)")
     except Exception as e:
         log("API HOST / WARN:", repr(e))
-    for path in ("/admin/users", "/api/whales"):
+
+    # На api-домене постороннему не видно ни админки, ни страниц-заглушек
+    for path in ("/admin", "/admin/users", "/robots.txt", "/sitemap.xml"):
         try:
             req = urllib.request.Request(BASE + path, headers={"Host": "api.rustdeck.app"})
             with urllib.request.urlopen(req, timeout=8) as r:
                 fails += 1
-                log(f"FAIL API HOST {path}: {r.status} (ожидаем 403 для гостя)")
+                log(f"FAIL API HOST {path}: {r.status} (ожидаем 404 для гостя)")
         except urllib.error.HTTPError as e:
-            ok = e.code == 403
+            body = e.read()
+            ok = e.code == 404 and not body
             if not ok:
                 fails += 1
-            log(f"{'OK ' if ok else 'FAIL'} API HOST {path}: {e.code} (ожидаемо 403)")
+            log(f"{'OK ' if ok else 'FAIL'} API HOST {path}: {e.code} (ожидаемо пустой 404)")
         except Exception as e:
             log(f"API HOST {path} WARN:", repr(e))
+
+    # ...но сам API на api-домене живёт (проверки, интеграции)
+    try:
+        req = urllib.request.Request(BASE + "/api/whales", headers={"Host": "api.rustdeck.app"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            ok = r.status == 200
+            if not ok:
+                fails += 1
+            log(f"{'OK ' if ok else 'FAIL'} API HOST /api/whales: {r.status} (API должен работать)")
+    except Exception as e:
+        fails += 1
+        log("API HOST /api/whales FAIL:", repr(e))
 
     # /api/profile без Google-сессии — 401
     try:
@@ -170,16 +218,16 @@ try:
         fails += 1
         log("ADMIN HTML FAIL:", repr(e))
 
-    # Основной домен: /admin тоже закрыт для гостя (панель не публичная)
+    # Основной домен: /admin посторонним не отвечает вообще (пустой 404)
     try:
         urllib.request.urlopen(BASE + "/admin", timeout=8)
         fails += 1
         log("FAIL ADMIN MAIN HOST: 200 без админ-сессии (панель открыта!)")
     except urllib.error.HTTPError as e:
-        ok = e.code == 403
+        ok = e.code == 404
         if not ok:
             fails += 1
-        log(f"{'OK ' if ok else 'FAIL'} ADMIN MAIN HOST: {e.code} (ожидаемо 403 для гостя)")
+        log(f"{'OK ' if ok else 'FAIL'} ADMIN MAIN HOST: {e.code} (ожидаемо 404 для гостя)")
     except Exception as e:
         log("ADMIN MAIN HOST WARN:", repr(e))
 
@@ -187,6 +235,137 @@ try:
     for p in ["/ethereum-risk-calculator", "/liquidation-calculator", "/leverage-calculator", "/solana-risk-calculator"]:
         assert p in sm, f"sitemap не содержит {p}"
     log("SITEMAP OK: все новые страницы на месте")
+
+    # ===== SEO: robots.txt и sitemap должны быть готовы к Google =====
+    _, rb = get("/robots.txt")
+    assert "Sitemap: https://rustdeck.app/sitemap.xml" in rb, "robots.txt: sitemap должен быть абсолютным URL"
+    assert "Disallow: /admin" in rb and "Disallow: /api/" in rb and "Disallow: /score/" in rb, \
+        "robots.txt: служебные пути не закрыты от индексации"
+    assert sm.count("<url>") == 8, f"sitemap: ожидали 8 страниц, получили {sm.count('<url>')}"
+    assert "<lastmod>" in sm and "<priority>" in sm, "sitemap: нет lastmod/priority"
+    assert sm.count("<loc>") == 8 and "onrender" not in sm, "sitemap: только канонические URL одного домена"
+    log("SEO OK: robots.txt (абсолютный sitemap, служебное закрыто) + sitemap (канонический домен)")
+
+    # ===== Security-заголовки =====
+    req = urllib.request.Request(BASE + "/", headers={"Host": "rustdeck.app"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        hdr = {k.lower(): v for k, v in r.headers.items()}
+    for h, want in (("x-content-type-options", "nosniff"), ("x-frame-options", "DENY")):
+        assert hdr.get(h) == want, f"нет заголовка {h}={want} (получили {hdr.get(h)})"
+    assert hdr.get("referrer-policy"), "нет Referrer-Policy"
+    assert not hdr.get("access-control-allow-origin"), "не должно быть открытого CORS"
+    log("HEADERS OK: nosniff, X-Frame-Options=DENY, Referrer-Policy, CORS закрыт")
+
+    # ===== Сессии и приватные роуты (подписываем cookie сами, как сервер) =====
+    try:
+        import main as _main
+        token = _main.make_session("smoke@example.com", "Smoke")
+        assert _main.read_session(token), "подписанная сессия не читается"
+        assert _main.read_session(token[:-3] + "0aa") is None, "подделка cookie принята — дыра!"
+        log("SESSION OK: своя cookie читается, подделанная отклоняется")
+
+        def req_with(path, payload=None, timeout=12):
+            hdrs = {"Cookie": "rd_session=" + token}
+            if payload is not None:
+                hdrs["Content-Type"] = "application/json"
+                rq = urllib.request.Request(BASE + path, data=json.dumps(payload).encode(),
+                                            headers=hdrs, method="POST")
+            else:
+                rq = urllib.request.Request(BASE + path, headers=hdrs)
+            with urllib.request.urlopen(rq, timeout=timeout) as r:
+                return r.status, r.read().decode("utf-8", "replace")
+
+        st, bd = req_with("/api/me")
+        assert json.loads(bd).get("authenticated") is True, f"/api/me с сессией: {bd[:120]}"
+        st, bd = req_with("/api/profile")
+        assert st == 200 and json.loads(bd).get("email") == "smoke@example.com", f"/api/profile: {bd[:120]}"
+        log("AUTH OK: /api/me и /api/profile отвечают по подписанной сессии")
+
+        # Кривой кошелёк отклоняется, HTML в имени вырезается (иначе разметка
+        # улетала в админ-панель)
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                BASE + "/api/profile", data=json.dumps({"wallet": "not-a-wallet"}).encode(),
+                headers={"Cookie": "rd_session=" + token, "Content-Type": "application/json"},
+                method="POST"), timeout=8)
+            fails += 1
+            log("FAIL PROFILE: кривой кошелёк принят")
+        except urllib.error.HTTPError as e:
+            ok = e.code == 400
+            if not ok:
+                fails += 1
+            log(f"{'OK ' if ok else 'FAIL'} PROFILE: кривой кошелёк → {e.code} (ожидаемо 400)")
+        st, bd = req_with("/api/profile", payload={"name": "<img src=x onerror=alert(1)>Alex"})
+        saved_name = json.loads(bd).get("name") or ""
+        ok = "<" not in saved_name and ">" not in saved_name
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} PROFILE SANITIZE: имя сохранено как '{saved_name}'")
+
+        # С валидной сессией TG-роуты доходят до бота: локально без токена 503
+        try:
+            req_with("/api/tg/link/start", payload={})
+            fails += 1
+            log("FAIL TG start: 200 без BOT_TOKEN")
+        except urllib.error.HTTPError as e:
+            ok = e.code == 503
+            if not ok:
+                fails += 1
+            log(f"{'OK ' if ok else 'FAIL'} TG start (с сессией): {e.code} (ожидаемо 503 без токена бота)")
+    except AssertionError as e:
+        fails += 1
+        log("SECURITY FAIL:", str(e))
+    except Exception as e:
+        log("SECURITY WARN:", repr(e))
+    # ===== Рейт-лимитер (защита квоты Hyperliquid) =====
+    try:
+        import main as _main_lim
+        ip = "203.0.113.77"
+        limit = _main_lim.RATE_LIMITS["score"][0]
+        blocked = sum(1 for _ in range(limit + 3) if _main_lim.rate_limited(ip, "score"))
+        assert blocked == 3, f"лимитер отсекает не то: {blocked} из {limit + 3}"
+        assert not _main_lim.rate_limited("198.51.100.9", "score"), "лимитер блокирует чужой IP"
+        log(f"RATE LIMIT OK: /score держит {limit} запросов/мин на IP, дальше 429")
+    except AssertionError as e:
+        fails += 1
+        log("RATE LIMIT FAIL:", str(e))
+    except Exception as e:
+        log("RATE LIMIT WARN:", repr(e))
+
+    # ===== Скан на утечки секретов в публичном репо =====
+    try:
+        import re as _re2
+        tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.split()
+        assert tracked, "git ls-files пуст — репозиторий не найден"
+        assert not [f for f in tracked if f.endswith(".db")], "БД с юзерами попала в git!"
+        assert not [f for f in tracked if f.startswith(".env")], ".env в git!"
+        patterns = [
+            r"BOT_TOKEN\s*=\s*[\"'][0-9]",
+            r"GOOGLE_CLIENT_SECRET\s*=\s*[\"'][A-Za-z0-9_\-]{6,}",
+            r"AIza[0-9A-Za-z_\-]{30,}",
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+            r"\d{8,10}:AA[A-Za-z0-9_\-]{30,}",
+        ]
+        hits = []
+        for fname in tracked:
+            if not fname.lower().endswith((".py", ".html", ".yaml", ".yml", ".md", ".txt", ".json")):
+                continue
+            try:
+                txt = open(fname, encoding="utf-8", errors="replace").read()
+            except Exception:
+                continue
+            for pat in patterns:
+                if _re2.search(pat, txt):
+                    hits.append((fname, pat))
+        assert not hits, f"похоже на утечку секретов: {hits}"
+        log(f"SECRETS OK: {len(tracked)} файлов в git — токенов бота, ключей Google и приватных ключей нет")
+    except AssertionError as e:
+        fails += 1
+        log("SECRETS FAIL:", str(e))
+    except Exception as e:
+        log("SECRETS WARN:", repr(e))
+
+
 
     _, html = get("/")
     for must in ["tickerItems", "Rust<span", "api/prices", "applyLivePrices", "entryTouchedByUser", "asset-price", "tgLinkBtn", "Connect Telegram"]:
@@ -207,7 +386,10 @@ try:
                  "chartTabs", "chartTip", "authModal", "authGoogleBtn", "tgModal", "tgConnectBtn",
                  "shareScoreBtn", "evOrders", "side-rail",
                  "calcTicker", "calcChart", "loadCalcTicker", "setWalletBtn",
-                 "authGoogleBtn", "convCoin", "calcCopyBtn", "calcHlBtn", "tgAlertStatus", "</html>"]:
+                 "authGoogleBtn", "convCoin", "convCoinList", "convQuick", "conv-chip",
+                 "calcCopyBtn", "calcHlBtn", "tgAlertStatus",
+                 "About RustDeck", "google-site-verification", "application/ld+json", "FAQPage",
+                 'rel="canonical"', "og:site_name", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Position Calculator" in hub, "на хабе должен быть калькулятор позиций"
     assert "calcChart" in hub, "на хабе нет графика калькулятора"

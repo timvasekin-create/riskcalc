@@ -405,7 +405,10 @@ def save_profile(email, name=None, wallet=None):
     conn = _db()
     row = conn.execute("SELECT * FROM profiles WHERE email=?", (email,)).fetchone()
     now = time.time()
-    new_name = (name or "").strip()[:24] or (row["name"] if row else None)
+    # Имя светится в админ-панели и в профиле — вырезаем HTML-символы
+    # (защита от подсунутой разметки) и режем длину.
+    safe_name = re.sub(r"[<>&\"'`]", "", (name or "").strip())[:24]
+    new_name = safe_name or (row["name"] if row else None)
     new_wallet = (wallet or "").strip().lower() or (row["wallet"] if row else None)
     if row:
         conn.execute(

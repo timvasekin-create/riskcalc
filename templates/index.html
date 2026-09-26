@@ -631,7 +631,10 @@
         let direction = 'long';
         let rrMode = 'auto';
         const TAKER_FEE = 0.00045;
-        const STORAGE_KEY = 'riskcalc_state_v1';
+        // Ключ localStorage: новый бренд, но читаем и старое имя (миграция
+        // без потери сохранённого состояния у тех, кто уже пользовался сайтом)
+        const STORAGE_KEY = 'rustdeck_state_v2';
+        const LEGACY_STORAGE_KEY = 'riskcalc_state_v1';
 
         // ===== Рендер активов =====
         const assetScroll = document.getElementById('assetScroll');
@@ -1041,7 +1044,7 @@
         });
 
         try {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
             if (saved) applyFormState(JSON.parse(saved));
         } catch(e) {}
 
@@ -1314,6 +1317,13 @@ Breakeven: ${r.breakeven.toFixed(6)}`;
                 if (!r.ok) {
                     tgLinkBtn.textContent = orig;
                     tgLinkBtn.disabled = false;
+                    if (r.status === 401) {
+                        // С 2026 привязка возможна только из личного кабинета
+                        // (код выдаётся на Google-аккаунт) — ведём юзера на хаб.
+                        tgLinkBox.classList.remove('hidden');
+                        tgSetStatus('Sign in on rustdeck.app to link Telegram — <a href="https://rustdeck.app/" class="text-hyper-teal underline">open the app</a>', 'bg-hyper-yellow');
+                        return;
+                    }
                     alert('Telegram linking is temporarily unavailable. Try later.');
                     return;
                 }

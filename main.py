@@ -24,18 +24,27 @@ HUB_PATH = os.path.join(BASE_DIR, "app", "index.html")
 async def head_root():
     return Response(status_code=200)
 
+# Канонический домен: sitemap, OAuth redirect_uri и внешние ссылки всегда
+# привязаны к нему, а не к Host-заголовку (защита от подмены хоста).
+CANONICAL_BASE = "https://rustdeck.app"
+
+def _not_found() -> Response:
+    """Пустой 404 без тела: для посторонних страницы будто не существует."""
+    return Response(status_code=404)
+
 # ===== SEO-роуты =====
-# Корень " /": домен rustdeck.app → ГЛАВНАЯ-ХАБ, прочие хосты (localhost,
-# riskcalc.onrender.com, служебный calc.*) → легаси-калькулятор.
-# calc.rustdeck.app выведен из DNS (на free-плане Render только 2 домена:
-# rustdeck.app + api.rustdeck.app) — роутинг оставлен как dev-фолбэк.
+# Корень "/": домен rustdeck.app → ГЛАВНАЯ-ХАБ, прочие хосты (localhost,
+# riskcalc.onrender.com) → легаси-калькулятор.
+# api.rustdeck.app НИЧЕГО не показывает: молча отдаёт пустой 404, никаких
+# страниц, подсказок и экранов входа для посторонних. API-роуты (/api/*)
+# при этом продолжают работать — домен живёт для проверок и интеграций.
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     host = (request.headers.get("host") or "").lower().split(":")[0]
+    if host.startswith("api."):
+        return _not_found()
     if host in ("rustdeck.app", "www.rustdeck.app"):
         return FileResponse(HUB_PATH)
-    if host.startswith("api."):
-        return _api_host_page(request)   # закрытая админка (только для нас, остальным 403)
     return FileResponse(INDEX_PATH)
 
 @app.get("/bitcoin-risk-calculator", response_class=HTMLResponse)
@@ -119,29 +128,54 @@ async def api_calculate(data: CalcInput):
     }
 
 # ===== SEO-служебные =====
+# robots.txt: пускаем краулеров на публичные страницы и закрываем служебное
+# (админка, JSON-API, карточки кошельков). Sitemap — АБСОЛЮТНЫЙ URL,
+# иначе Google Search Console не принимает файл.
 @app.get("/robots.txt")
 async def robots():
-    return HTMLResponse(content="User-agent: *\nAllow: /\nSitemap: /sitemap.xml", media_type="text/plain")
+    txt = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        "Disallow: /score/\n"
+        "\n"
+        f"Sitemap: {CANONICAL_BASE}/sitemap.xml\n"
+    )
+    return HTMLResponse(content=txt, media_type="text/plain")
 
+# Sitemap: только канонический домен (не зеркало на onrender) — иначе Google
+# увидит дубли страниц и склеит их не в нашу пользу.
 @app.get("/sitemap.xml")
 async def sitemap(request: Request):
-    base = str(request.base_url).rstrip("/")
-    paths = [
-        "/", 
-        "/bitcoin-risk-calculator", 
-        "/bybit-calculator", 
-        "/hyperliquid-calculator",
-        "/ethereum-risk-calculator",
-        "/solana-risk-calculator",
-        "/leverage-calculator",
-        "/liquidation-calculator",
+    base = _public_base(request)
+    pages = [
+        ("/", "1.0", "daily"),
+        ("/hyperliquid-calculator", "0.9", "weekly"),
+        ("/bitcoin-risk-calculator", "0.8", "weekly"),
+        ("/bybit-calculator", "0.8", "weekly"),
+        ("/ethereum-risk-calculator", "0.8", "weekly"),
+        ("/solana-risk-calculator", "0.8", "weekly"),
+        ("/leverage-calculator", "0.7", "weekly"),
+        ("/liquidation-calculator", "0.7", "weekly"),
     ]
+    lastmod = _time.strftime("%Y-%m-%d")
     urls = "".join(
-        f"<url><loc>{base}{p}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>"
-        for p in paths
+        f"<url><loc>{base}{p}</loc><lastmod>{lastmod}</lastmod>"
+        f"<changefreq>{freq}</changefreq><priority>{prio}</priority></url>"
+        for p, prio, freq in pages
     )
     xml = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'
     return HTMLResponse(content=xml, media_type="application/xml")
+
+def _public_base(request: Request) -> str:
+    """Базовый URL для внешних ссылок (sitemap, OAuth redirect_uri): всегда
+    канонический https://rustdeck.app, кроме локальной разработки и
+    dev-зеркала на onrender — там Host-заголовок свой."""
+    host = (request.headers.get("host") or "").lower().split(":")[0]
+    if host in ("localhost", "127.0.0.1") or host.endswith(".onrender.com"):
+        return str(request.base_url).rstrip("/")
+    return CANONICAL_BASE
 
 # ===== API: живые цены для тикера и внешних интеграций =====
 # Серверный прокси к Binance + Hyperliquid (решает CORS и кэшируется на 30 сек)
@@ -154,41 +188,140 @@ import threading as _threading
 HL_INFO_URL = "https://api-ui.hyperliquid.xyz/info"
 
 PRICE_CACHE: dict = {"data": None, "ts": 0.0}
-PRICE_TTL = 30  # секунд
+PRICE_TTL = 30    # секунд
+PRICE_MAX = 120   # сколько монет отдаём фронту (конвертеру хватает с запасом)
 
-def _fetch_json(url: str, payload: Optional[dict] = None, timeout: float = 5.0):
-    """Мини-HTTP клиент без внешних зависимостей."""
-    if payload is not None:
-        req = urllib.request.Request(
-            url,
-            data=_json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-    else:
-        req = urllib.request.Request(url, headers={"User-Agent": "rustdeck/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return _json.loads(resp.read().decode("utf-8"))
+# Порядок в тикере и конвертере: сначала «народные» монеты, дальше — по объёму
+POPULAR = ["BTC", "ETH", "SOL", "HYPE", "BNB", "XRP", "DOGE", "LINK", "AVAX", "SUI",
+           "ARB", "TIA", "TON", "ADA", "DOT", "LTC", "PEPE", "WIF", "NEAR", "APT"]
+# Стейблкоины (курс $1) — нужны конвертеру, среди перпов HL их нет
+STABLES = ("USDC", "USDT", "USDE", "DAI", "FDUSD")
+
+def _hl_price_rows() -> list:
+    """Все перпы Hyperliquid: цена, 24ч-% и объём за сутки.
+    markPx — текущая цена, prevDayPx — цена сутки назад, поэтому процент
+    получается ровно тот, что видит юзер в интерфейсе Hyperliquid."""
+    data = _hl_info({"type": "metaAndAssetCtxs"}, timeout=6)
+    meta, ctxs = data[0], data[1]
+    rows = []
+    for i, asset in enumerate(meta.get("universe") or []):
+        if i >= len(ctxs) or asset.get("isDelisted"):
+            continue
+        c = ctxs[i] or {}
+        try:
+            price = float(c.get("markPx") or c.get("midPx") or c.get("oraclePx") or 0)
+            prev = float(c.get("prevDayPx") or 0)
+            volume = float(c.get("dayNtlVlm") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        change = (price - prev) / prev * 100 if prev > 0 else None
+        rows.append({
+            "symbol": (asset.get("name") or "").upper(),
+            "price": price,
+            "change24h": round(change, 2) if change is not None else None,
+            "volume24h": round(volume, 0),
+        })
+    return [r for r in rows if r["symbol"]]
+
+def _fetch_json(url: str, payload: Optional[dict] = None, timeout: float = 5.0, retries: int = 2):
+    """Мини-HTTP клиент без внешних зависимостей.
+    Пара попыток на запрос: Hyperliquid и Binance периодически отвечают
+    5xx/таймаутом на первый вызов — раньше это вылезало в лог как «502 Bad Gateway»."""
+    last_err = None
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        try:
+            if payload is not None:
+                req = urllib.request.Request(
+                    url,
+                    data=_json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+            else:
+                req = urllib.request.Request(url, headers={"User-Agent": "rustdeck/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return _json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            if attempt + 1 < attempts:
+                _time.sleep(0.35)
+    raise last_err
+
+# ===== Рейт-лимитер: защита квоты Hyperliquid и CPU на бесплатном Render =====
+# Скользящее окно в памяти процесса: (лимит, окно в секундах).
+RATE_LIMITS = {
+    "wallet": (120, 60),      # фронт опрашивает раз в 5 сек ≈ 12/мин
+    "fills": (30, 60),
+    "score": (20, 60),
+    "leaderboard": (20, 60),
+    "whales": (60, 60),
+    "tg": (20, 60),
+    "prices": (240, 60),
+    "default": (600, 60),
+}
+_RATE_HITS: dict = {}
+_RATE_LOCK = _threading.Lock()
+
+def _client_ip(request: Request) -> str:
+    """IP клиента с учётом прокси Render (X-Forwarded-For)."""
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if fwd:
+        return fwd
+    return (request.client.host if request.client else "") or "-"
+
+def rate_limited(ip: str, bucket: str = "default") -> bool:
+    """True — лимит исчерпан. Память подчищается по ходу (без фоновых задач)."""
+    limit, window = RATE_LIMITS.get(bucket, RATE_LIMITS["default"])
+    now = _time.time()
+    key = (ip or "-", bucket)
+    with _RATE_LOCK:
+        hits = [t for t in _RATE_HITS.get(key, ()) if now - t < window]
+        if len(hits) >= limit:
+            _RATE_HITS[key] = hits
+            return True
+        hits.append(now)
+        _RATE_HITS[key] = hits
+        if len(_RATE_HITS) > 5000:   # страховка от роста словаря
+            for k in [k for k, v in _RATE_HITS.items() if not v or now - v[-1] > 600]:
+                _RATE_HITS.pop(k, None)
+    return False
 
 @app.get("/api/prices")
-async def api_prices():
-    """Живые цены топ-5 монет: BTC, ETH, SOL, HYPE, BNB. Кэш 30 сек."""
+async def api_prices(request: Request):
+    """Цены и 24ч-% для тикера и конвертера (основа — Hyperliquid).
+    Кэш 30 сек; если источники недоступны — отдаём прошлый кэш, а не пустоту."""
+    if rate_limited(_client_ip(request), "prices"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     now = _time.time()
     if PRICE_CACHE["data"] and now - PRICE_CACHE["ts"] < PRICE_TTL:
         return PRICE_CACHE["data"]
 
-    result = []
-    # Binance: все монеты списка, кроме HYPE — цена и 24h% одним запросом
+    # Источник №1 — сам Hyperliquid: цены и проценты по ВСЕМ перпам.
+    try:
+        result = _hl_price_rows()
+    except Exception:
+        result = []
+
+    # Источник №2 — Binance: добираем монеты, которых нет на HL, и полностью
+    # заменяем данные, если Hyperliquid недоступен.
     try:
         data = _fetch_json(
             "https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22,%22XRPUSDT%22,%22DOGEUSDT%22,%22LINKUSDT%22,%22AVAXUSDT%22,%22ARBUSDT%22,%22SUIUSDT%22,%22TIAUSDT%22%5D",
             timeout=4.0,
         )
+        have = {r["symbol"] for r in result}
         for t in data:
+            sym = t["symbol"].replace("USDT", "")
+            if sym in have:
+                continue   # HL уже дал цену и 24ч-% по этой монете
             result.append({
-                "symbol": t["symbol"].replace("USDT", ""),
+                "symbol": sym,
                 "price": float(t["lastPrice"]),
                 "change24h": float(t["priceChangePercent"]),
+                "volume24h": float(t.get("quoteVolume") or 0),
             })
     except Exception:
         pass
@@ -217,50 +350,31 @@ async def api_prices():
         except Exception:
             pass
 
-    # HYPE — только на Hyperliquid: mid-цена + 24h% из дневной свечи
-    try:
-        mids = _fetch_json(
-            "https://api-ui.hyperliquid.xyz/info",
-            payload={"type": "allMids"},
-        )
-        hype_mid = float(mids.get("@107", 0))  # @107 = HYPE
-        if hype_mid > 0:
-            change = None
-            try:
-                # Точное 24ч изменение: часовая свеча 24 часа назад
-                # (дневная даёт открытие сегодняшнего дня — процент врёт)
-                candles = _fetch_json(
-                    "https://api-ui.hyperliquid.xyz/info",
-                    payload={
-                        "type": "candleSnapshot",
-                        "req": {
-                            "coin": "@107",
-                            "interval": "1h",
-                            "startTime": int((_time.time() - 25 * 3600) * 1000),
-                            "endTime": int(_time.time() * 1000),
-                        },
-                    },
-                )
-                if isinstance(candles, list) and candles:
-                    open_price = float(candles[0]["o"])
-                    if open_price > 0:
-                        change = (hype_mid - open_price) / open_price * 100
-            except Exception:
-                pass
-            result.append({
-                "symbol": "HYPE",
-                "price": hype_mid,
-                "change24h": round(change, 2) if change is not None else None,
-            })
-    except Exception:
-        pass
+    # Ни один источник не ответил — отдаём прошлый кэш вместо пустого тикера
+    if not result and PRICE_CACHE["data"]:
+        return PRICE_CACHE["data"]
 
-    # Порядок: сначала топ-5 для тикера, потом остальные активы по списку
-    order = {"BTC": 0, "ETH": 1, "SOL": 2, "HYPE": 3, "BNB": 4,
-             "XRP": 5, "DOGE": 6, "LINK": 7, "AVAX": 8, "ARB": 9, "SUI": 10, "TIA": 11}
-    result.sort(key=lambda x: order.get(x["symbol"], 99))
+    # Стейблкоины: курс ровно $1 (среди перпов HL их нет, а конвертеру нужны).
+    # Держим их в ответе ВСЕГДА — они не участвуют в обрезке списка по PRICE_MAX.
+    have = {r["symbol"] for r in result}
+    for sym in STABLES:
+        if sym not in have:
+            result.append({"symbol": sym, "price": 1.0, "change24h": 0.0, "volume24h": 0})
 
-    data_out = {"updated": int(now), "prices": result}
+    def _rank(row):
+        try:
+            return POPULAR.index(row["symbol"])
+        except ValueError:
+            return len(POPULAR)
+
+    stables = [r for r in result if r["symbol"] in STABLES]
+    rest = [r for r in result if r["symbol"] not in STABLES]
+    # Порядок: сначала топ (тикер и популярные монеты конвертера),
+    # дальше — по объёму торгов за сутки, чтобы список был «живым».
+    rest.sort(key=lambda r: (_rank(r), -(r.get("volume24h") or 0)))
+    prices = rest[:max(0, PRICE_MAX - len(stables))] + stables
+
+    data_out = {"updated": int(now), "prices": prices, "count": len(result)}
     PRICE_CACHE["data"] = data_out
     PRICE_CACHE["ts"] = now
     return data_out
@@ -310,9 +424,11 @@ def _hl_info(payload: dict, timeout: float = 10.0):
     return _fetch_json(HL_INFO_URL, payload=payload, timeout=timeout)
 
 @app.get("/api/wallet/{address}")
-async def api_wallet(address: str):
+async def api_wallet(address: str, request: Request):
     """Статистика любого Hyperliquid-кошелька: баланс, PnL, win rate,
-    открытые позиции и последние сделки. Кэш 30 сек."""
+    открытые позиции и последние сделки. Кэш 5 сек, лимит запросов на IP."""
+    if rate_limited(_client_ip(request), "wallet"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     address = (address or "").strip()
     if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
         return JSONResponse({"error": "invalid_address"}, status_code=400)
@@ -635,8 +751,10 @@ async def api_wallet(address: str):
     return data_out
 
 @app.get("/api/fills/{address}")
-async def api_fills(address: str, limit: int = 200):
+async def api_fills(address: str, request: Request, limit: int = 200):
     """Все сделки кошелька для экспорта CSV (до 500 последних)."""
+    if rate_limited(_client_ip(request), "fills"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     address = (address or "").strip()
     if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
         return JSONResponse({"error": "invalid_address"}, status_code=400)
@@ -666,9 +784,11 @@ MARKETS_CACHE: dict = {"data": None, "ts": 0.0}
 MARKETS_TTL = 30  # секунд
 
 @app.get("/api/markets")
-async def api_markets():
+async def api_markets(request: Request):
     """Скринер перпетуалов Hyperliquid: цена, изменение 24ч, объём 24ч,
     открытый интерес (USD) и ставка фандинга. Кэш 30 сек."""
+    if rate_limited(_client_ip(request), "prices"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     now = _time.time()
     if MARKETS_CACHE["data"] and now - MARKETS_CACHE["ts"] < MARKETS_TTL:
         return MARKETS_CACHE["data"]
@@ -768,8 +888,10 @@ LB_TTL = 300          # кэш 5 минут (файл тяжёлый, ~10MB)
 LB_MIN_VALUE = 1_000  # отсекаем пустые аккаунты
 
 @app.get("/api/leaderboard")
-async def api_leaderboard():
+async def api_leaderboard(request: Request):
     """Топ-трейдеры Hyperliquid по PnL за 24h / 7d / allTime (windowPerformances)."""
+    if rate_limited(_client_ip(request), "leaderboard"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     now = _time.time()
     if LB_CACHE["data"] and now - LB_CACHE["ts"] < LB_TTL:
         return LB_CACHE["data"]
@@ -884,9 +1006,11 @@ def _whale_universe():
         return uni["addrs"]
 
 @app.get("/api/whales")
-async def api_whales():
+async def api_whales(request: Request):
     """Лента крупных сделок (>= $250K) топ-китов за 24ч. Мгновенно из кэша —
     обновляет фоновый поток (40 HL-запросов нельзя делать в веб-запросе)."""
+    if rate_limited(_client_ip(request), "whales"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     cached = WHALE_CACHE["data"]
     if cached:
         return cached
@@ -1003,8 +1127,10 @@ async def api_candles(coin: str, interval: str = "1h", hours: int = 72):
     return data
 
 @app.get("/score/{address}", response_class=HTMLResponse)
-async def score_page(address: str):
+async def score_page(address: str, request: Request):
     """Публичная карточка RustDeck Score — шарится в TG/X."""
+    if rate_limited(_client_ip(request), "score"):
+        return HTMLResponse("<h1 style='font-family:sans-serif'>Too many requests, try in a minute</h1>", status_code=429)
     if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
         return HTMLResponse("<h1 style='font-family:sans-serif'>Invalid address</h1>", status_code=400)
     address = address.lower()
@@ -1107,21 +1233,16 @@ body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-co
 @app.post("/api/tg/link/start")
 async def tg_link_start(request: Request):
     """Сайт просит 6-значный код привязки. Юзер отправит его боту.
-    Email берём из Google-сессии (подделать нельзя), тело запроса — фолбэк."""
+    Email берём ТОЛЬКО из Google-сессии: иначе чужой мог бы выпустить код
+    на чужую почту и увести к себе в Telegram подписку и алерты."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if rate_limited(_client_ip(request), "tg"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     if not BOT_ENABLED:
         return JSONResponse({"error": "bot_disabled"}, status_code=503)
-    email = None
-    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
-    if sess:
-        email = sess[0]
-    if not email:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                email = (body.get("email") or "").strip().lower() or None
-        except Exception:
-            email = None
-    code = tg_bot.create_link_code(email)
+    code = tg_bot.create_link_code(sess[0])
     if not code:
         return JSONResponse({"error": "code_generation_failed"}, status_code=500)
     username = tg_bot.get_bot_username()
@@ -1148,9 +1269,19 @@ class TgWatchInput(BaseModel):
     wallet: str
 
 @app.post("/api/tg/watch")
-async def tg_watch(data: TgWatchInput):
+async def tg_watch(data: TgWatchInput, request: Request):
+    """Мост «сайт → TG»: кошелёк добавляем только тому chat_id, который
+    привязан к этой же Google-сессии (иначе чужой мог бы спамить в любой чат)."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if rate_limited(_client_ip(request), "tg"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     if not BOT_ENABLED:
         return JSONResponse({"error": "bot_disabled"}, status_code=503)
+    sub = tg_bot.subscriber_by_email(sess[0])
+    if not sub or sub.get("chat_id") != data.chat_id:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
     return tg_bot.add_watch(data.chat_id, data.wallet)
 
 
@@ -1208,7 +1339,7 @@ async def auth_google(request: Request):
     """Редирект на Google. Без ключей — возвращаемся на сайт с подсказкой."""
     if not google_ready():
         return RedirectResponse(url="/?google=unavailable", status_code=302)
-    base = str(request.base_url).rstrip("/")
+    base = _public_base(request)   # канонический домен, а не Host-заголовок
     state = _secrets.token_urlsafe(16)
     params = {
         "client_id": GOOGLE_CLIENT_ID,
@@ -1236,7 +1367,7 @@ async def auth_google_callback(request: Request, code: str = "", state: str = ""
     if not google_ready():
         return RedirectResponse("/?google=unavailable", status_code=302)
 
-    base = str(request.base_url).rstrip("/")
+    base = _public_base(request)   # тот же домен, что и в /auth/google (иначе Google отклонит)
     try:
         form = _urlencode({
             "code": code,
@@ -1337,10 +1468,13 @@ async def api_profile_set(data: ProfileInput, request: Request):
     wallet = (data.wallet or "").strip()
     if wallet and not _re.fullmatch(r"0x[0-9a-fA-F]{40}", wallet):
         return JSONResponse({"error": "invalid_wallet"}, status_code=400)
+    # Имя показывается в админке и в профиле — вырезаем HTML-символы
+    # и режем длину, чтобы никто не подсунул разметку/скрипт.
+    name = _re.sub(r"[<>&\"'`]", "", (data.name or "").strip())[:24] or None
     if not BOT_ENABLED:
-        return {"ok": True, "email": email, "name": (data.name or "").strip() or None,
+        return {"ok": True, "email": email, "name": name,
                 "wallet": wallet.lower() or None}
-    prof = tg_bot.save_profile(email, data.name, wallet or None)
+    prof = tg_bot.save_profile(email, name, wallet or None)
     return {"ok": True, **(prof or {})}
 
 
@@ -1359,43 +1493,10 @@ def admin_session(request: Request):
         return None
     return sess
 
-def _admin_login_html(note: str = "") -> str:
-    """Экран входа для api-домена: чужим — 403, свои видят кнопку Google."""
-    html = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RustDeck API — restricted</title><meta name="robots" content="noindex">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-<style>
-body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-       background:#0a0e13; color:#eaecef; font-family:Inter,Arial,sans-serif; }
-.card { background:#0f1419; border:1px solid #1e252e; border-radius:16px; padding:28px 32px;
-        text-align:center; max-width:430px; width:calc(100% - 40px); }
-h1 { font-size:18px; margin:10px 0 8px; }
-p { color:#8b96a3; font-size:12px; line-height:1.65; margin:0 0 6px; }
-a.btn { display:block; margin-top:16px; background:#50d2c1; color:#0a0e13; font-weight:700;
-        padding:12px; border-radius:10px; text-decoration:none; font-size:13px; }
-small { color:#5c6670; font-size:10px; display:block; margin-top:10px; }
-.note { color:#f6465d; font-size:11px; margin-top:8px; }
-</style></head><body><div class="card">
-<div style="font-size:28px">🔒</div>
-<h1>RustDeck API — restricted area</h1>
-<p>Внутренний домен: здесь живёт админ-консоль RustDeck.<br>
-Публичные данные — цены, кошельки, рынки — на <a href="https://rustdeck.app" style="color:#50d2c1">rustdeck.app</a>.</p>
-NOTE_BLOCK
-<a class="btn" href="/auth/google">Sign in with Google</a>
-<small>Access is limited to approved accounts.</small>
-</div></body></html>"""
-    return html.replace("NOTE_BLOCK", note)
-
-def _api_host_page(request: Request):
-    """Страница api.rustdeck.app: админка для своих, 403 для остальных."""
-    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
-    if sess and is_admin(sess[0]):
-        return HTMLResponse(_admin_page_html(sess[0]))
-    if sess:
-        note = '<div class="note">Signed in as %s — no admin access for this account.</div>' % sess[0]
-        return HTMLResponse(_admin_login_html(note), status_code=403)
-    return HTMLResponse(_admin_login_html())
+# Экран входа на api-домене убран (его видела любая случайная проверка домена).
+# Логика такая: api.rustdeck.app для посторонних не существует (пустой 404),
+# вход в админку — обычный Google-логин на rustdeck.app, дальше /admin.
+# Панель нужна и на api-домене (ей удобнее), но только с админ-сессией.
 
 
 # ---- HTML админ-дашборда (api.rustdeck.app), разбит на части для читаемости ----
@@ -1543,14 +1644,13 @@ class AddDaysInput(BaseModel):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_home(request: Request):
-    """Админка и на основном домене (скрытый путь): только для ADMIN_EMAILS.
-    Остальным — 403, чтобы панель не была публичной."""
+    """Админка (скрытый путь) — только для ADMIN_EMAILS.
+    Посторонним отдаём пустой 404: панель не палит даже факт существования.
+    Вход — обычная Google-сессия на rustdeck.app, затем /admin."""
     sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
     if sess and is_admin(sess[0]):
         return HTMLResponse(_admin_page_html(sess[0]))
-    note = ('<div class="note">Signed in as %s — no admin access for this account.</div>' % sess[0]
-            if sess else '<div class="note">Admin access only — sign in with an approved Google account.</div>')
-    return HTMLResponse(_admin_login_html(note), status_code=403)
+    return _not_found()
 
 @app.get("/admin/users")
 async def admin_users(request: Request):
@@ -1572,23 +1672,39 @@ async def admin_add_days(data: AddDaysInput, request: Request):
 
 @app.middleware("http")
 async def api_host_guard(request: Request, call_next):
-    """api.rustdeck.app — внутренний домен: посторонним 403,
-    открыто только через Google-вход и админские пути."""
+    """Единый слой для всех ответов:
+    1) api.rustdeck.app — «невидимый» домен: страницы не отдаются вообще
+       (пустой 404), работают только /api/* и админка с админ-сессией;
+    2) базовые security-заголовки для всего остального."""
     host = (request.headers.get("host") or "").lower().split(":")[0]
-    if host.startswith("api."):
+    on_api_host = host.startswith("api.")
+    if on_api_host:
         path = request.url.path
-        allowed = (
-            path == "/" or path == "/favicon.ico"
-            or path in ("/api/me", "/api/logout")
-            or path.startswith("/auth/")
-            or path.startswith("/admin")
-        )
-        if not allowed:
+        if path.startswith("/admin"):
+            # админка на api-домене — только со своей админ-сессией
             sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
-            if not sess or not is_admin(sess[0]):
-                note = '<div class="note">Private API — admin access only.</div>'
-                return HTMLResponse(_admin_login_html(note), status_code=403)
-    return await call_next(request)
+            allowed = bool(sess and is_admin(sess[0]))
+        else:
+            # API работает (проверки, интеграции), всё остальное — молча 404
+            allowed = path.startswith("/api/") or path.startswith("/auth/")
+        if not allowed:
+            hidden = _not_found()
+            hidden.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+            hidden.headers["X-Content-Type-Options"] = "nosniff"
+            return hidden
+
+    response = await call_next(request)
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    if request.url.scheme == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if on_api_host:
+        # api-домен не должен попадать в поисковую выдачу ни при каких условиях
+        h["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 

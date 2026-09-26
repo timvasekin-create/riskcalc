@@ -2,9 +2,11 @@
 # Сервис riskcalc.onrender.com обслуживает:
 #   - rustdeck.app (корень) → главная-хаб (app/index.html)
 #   - rustdeck.app/<SEO-страница> → легаси-калькулятор (templates/index.html)
-#   - api.rustdeck.app → те же JSON-роуты (/api/*)
+#   - rustdeck.app/admin → админка (только для ADMIN_EMAILS, остальным пустой 404)
+#   - api.rustdeck.app → «невидимый» домен: страницы не отдаются (пустой 404),
+#     работают только /api/* (интеграции, проверки, UptimeRobot)
 #   - localhost / riskcalc.onrender.com → легаси-калькулятор (dev-фолбэк)
-# Выбор страницы для "/" — по Host-заголовку в main.py.
+# Выбор страницы для "/" — по Host-заголовку в main.py (root() + middleware).
 #
 # DNS в Porkbun (free-план Render: максимум 2 кастомных домена —
 # rustdeck.app + api.rustdeck.app; calc.rustdeck.app выведен):
@@ -36,6 +38,6 @@ services:
       # Подпись cookie-сессии (любая длинная случайная строка, напр. openssl rand -hex 32)
       - key: APP_SECRET
         sync: false
-      # Админы админки api.rustdeck.app (email через запятую; по умолчанию — владелец)
+      # Админы админки /admin (email через запятую; по умолчанию — владелец)
       - key: ADMIN_EMAILS
         sync: false

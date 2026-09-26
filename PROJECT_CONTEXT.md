@@ -227,9 +227,11 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
 - График калькулятора обновляется каждые 5 сек, только при активной вкладке
   (visibilitychange). Сервер: CANDLE_TTL=5с, CANDLE_MAX=16 записей, вытеснение самой
   старой (было clear() всего кэша), SVG на клиенте не перерисовывается без изменений.
-- НОВОЕ: Converter на хабе (#converter) — крипта ⇄ USD по живым ценам /api/prices,
-  переключение направления кнопкой ⇄.
-- НОВОЕ: «📋 Copy summary» — готовый текст плана позиции для Telegram; «Trade on HL →»
+- Converter на хабе (#converter): крипта ⇄ USD по живым ценам /api/prices.
+  В поле монеты — поиск по тикеру (input + datalist, ~120 монет), быстрые
+  кнопки BTC/ETH/SOL/HYPE/BNB/XRP/DOGE/TON/USDC, курс с 24ч-%, переключение
+  направления кнопкой ⇄, стейблы считаются как $1.
+- «📋 Copy summary» — готовый текст плана позиции для Telegram; «Trade on HL →»
   ведёт на app.hyperliquid.xyz/trade/{COIN}.
 - dev-утилита: `python js_check.py` — проверка синтаксиса всех inline-<script> в
   app/index.html и templates/index.html через `node --check` (результат в js_check_out.txt).
@@ -251,13 +253,25 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   «Connect Telegram» → отдельная модалка #tgModal с уже заполненными данными
   (Account / Wallet / Telegram / Subscription) — без почты. Профиль хранится в БД
   (таблица profiles: email, name, wallet) и отдаётся через GET/POST /api/profile.
-- АДМИНКА на api.rustdeck.app: домен закрыт (гостю — экран входа, чужим 403, сам
-  /api/* на api-домене тоже 403). Для админов (ADMIN_EMAILS, по умолчанию
-  ila281510@gmail.com) — дашборд: юзер, TG-юзернейм, почта, кошелёк, подписка
-  (tier, дней осталось, active), счётчики кошельков/алертов, кнопки +1/+7/+30 дней.
-  Эндпоинты: GET /admin/users, POST /admin/add_days.
-- ТИКЕР: HYPE теперь с 24ч-% (данные берём со своего /api/prices, где процент
-  считается по часовой свече 24ч назад) — раньше был прочерк.
+- АДМИНКА (скрытый путь rustdeck.app/admin): доступна только ADMIN_EMAILS
+  (по умолчанию ila281510@gmail.com) — дашборд: юзер, TG-юзернейм, почта, кошелёк,
+  подписка (tier, дней осталось, active), счётчики кошельков/алертов, кнопки
+  +1/+7/+30 дней. Эндпоинты: GET /admin/users, POST /admin/add_days.
+  Вход — обычная Google-сессия на rustdeck.app, потом /admin.
+  Посторонним /admin отдаёт ПУСТОЙ 404 (никаких экранов входа и подсказок).
+- api.rustdeck.app — «невидимый» домен: зайдя на него в браузере, никто ничего
+  не увидит (пустой 404 без тела на любую страницу, включая /admin без админ-сессии).
+  При этом /api/* на api-домене РАБОТАЕТ (проверки, интеграции, UptimeRobot),
+  плюс X-Robots-Tag: noindex для всего домена. Экран «RustDeck API — restricted»
+  и кнопка Sign in with Google с api-домена убраны.
+- ЦЕНЫ И ПРОЦЕНТЫ (важно): /api/prices собирается из самого Hyperliquid
+  (metaAndAssetCtxs: markPx + prevDayPx → 24ч-%), поэтому цифры совпадают с UI
+  биржи по ВСЕМ монетам — BTC, ETH, SOL, HYPE, BNB, XRP, DOGE и т.д. Раньше
+  Binance/CoinGecko недоступны из региона Render → в тикере были прочерки.
+  Binance подключён добором (монеты, которых нет на HL), CoinGecko — как
+  последний фолбэк; при полном сбое отдаём прошлый кэш, а не пустоту.
+  В ответе 120 монет (порядок: сначала топ, дальше по объёму торгов за сутки)
+  + стейблы USDC/USDT/USDE/DAI/FDUSD с курсом $1.
 - SHARE SCORE: кнопка «🔗 Share score» рядом с кошельком — копирует ссылку
   rustdeck.app/score/<wallet> (Web Share API на телефонах, иначе clipboard).
 - АВТОРИЗАЦИЯ: Google OAuth 2.0 (stdlib): /auth/google → Google → /auth/google/callback
@@ -265,6 +279,35 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   привязанный TG. POST /api/logout. Кнопка «Continue with Google» в auth-модалке;
   Telegram можно привязать в любой момент из профиля («🔑 Create code») — после /link
   профиль сам подтянет chat_id (@/api/me) и включит DM-алерты.
+
+## РАУНД «SEO + БЕЗОПАСНОСТЬ + ЦЕНЫ» (текущее состояние)
+
+- SEO/индексация Google: в хабе есть canonical, robots-мета (index, follow), og/twitter
+  теги, theme-color, meta google-site-verification (тот же токен, что у калькулятора,
+  чтобы подтвердить домен в Search Console) и JSON-LD (WebApplication + FAQPage).
+  Добавлен текстовый блок «About RustDeck» + FAQ (реальный контент для индексации).
+  robots.txt: Allow /, Disallow /admin, /api/, /score/ + АБСОЛЮТНЫЙ
+  `Sitemap: https://rustdeck.app/sitemap.xml`. Sitemap: 8 страниц с lastmod/
+  priority и только канонический домен (без onrender-зеркала).
+- Безопасность (самопроверка «взломай себя»):
+  * /api/tg/link/start требует Google-сессию (раньше можно было прислать чужой
+    email в теле запроса и увести чужую подписку/алерты в свой Telegram) → 401.
+  * /api/tg/watch: кошелёк добавляется только тому chat_id, который привязан
+    к этой же сессии (иначе 403) — нельзя спамить в чужой чат.
+  * Имя профиля санитизируется (вырезаются <>&"'` и длина 24) и в main.py, и в
+    bot.save_profile — защита от подсунутой разметки в админ-панели.
+  * Рейт-лимитер в памяти (main.RATE_LIMITS/rate_limited): wallet 120/мин,
+    fills 30, score 20, leaderboard 20, whales 60, tg 20, prices 240 → 429.
+  * Security-заголовки: X-Content-Type-Options, X-Frame-Options=DENY,
+    Referrer-Policy, Permissions-Policy, HSTS на https, X-Robots-Tag для api-домена.
+  * OAuth redirect_uri и sitemap строятся от CANONICAL_BASE (защита от подмены Host).
+  * _fetch_json получил ретрай (2 попытки) — меньше «502 Bad Gateway» на HL/Binance.
+  * Секреты: в git только 11 файлов, .db и .env игнорируются; smoke-тест сканирует
+    репозиторий на BOT_TOKEN/Google-ключи/приватные ключи.
+- Смоук-тест расширен: цены (24ч-% у всех монет тикера, ≥50 монет, USDC=$1),
+  «невидимый» api-домен (пустой 404 + X-Robots-Tag, но /api/whales работает),
+  /admin=404 для гостя, SEO robots/sitemap, security-заголовки, подписанные
+  сессии (подделка cookie отклоняется), санитайз имени, рейт-лимитер, скан секретов.
 
 ## КАК НАСТРОИТЬ GOOGLE SIGN-IN (5 минут)
 1. console.cloud.google.com → New Project (rustdeck) → APIs & Services → OAuth consent
