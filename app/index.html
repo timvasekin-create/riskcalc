@@ -309,6 +309,7 @@
                         <span></span>
                         <span class="flex items-center gap-2">
                             <a id="followTgBtn" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Get alerts for this wallet in Telegram 24/7">✈️ Watch in TG</a>
+                            <button type="button" id="shareScoreBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Copy the public RustDeck Score link for this wallet">🔗 Share score</button>
                             <button type="button" id="refreshWalletBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Refresh wallet data">⟳ Refresh</button>
                         </span>
                     </div>
@@ -596,18 +597,19 @@
             return mid;
         }
 
+        // Тикер: данные с нашего /api/prices (Binance + Hyperliquid).
+        // HYPE считается на сервере вместе с 24ч-% — раньше тут был прочерк.
         async function loadTicker() {
             if (tickerFirst) { tickerEl.innerHTML = TICKER_COINS.map(s => tickerItem(s, '…', null)).join(''); tickerFirst = false; }
-            const bin = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22,%22BNBUSDT%22%5D')
-                .then(r => r.ok ? r.json() : null).catch(() => null);
-            const hype = await fetchHypeMid().catch(() => null);
-            const items = [];
-            for (const s of TICKER_COINS) {
-                if (s === 'HYPE') { items.push(tickerItem('HYPE', hype ? fmtPrice(hype) : '—', null)); continue; }
-                const t = bin ? bin.find(x => x.symbol === s + 'USDT') : null;
-                items.push(tickerItem(s, t ? fmtPrice(parseFloat(t.lastPrice)) : '—', t ? parseFloat(t.priceChangePercent) : null));
-            }
-            tickerEl.innerHTML = items.join('');
+            try {
+                const j = await (await fetch('/api/prices')).json();
+                const map = {};
+                (j.prices || []).forEach(p => { map[p.symbol] = p; });
+                tickerEl.innerHTML = TICKER_COINS.map(s => {
+                    const p = map[s];
+                    return tickerItem(s, p ? fmtPrice(p.price) : '—', p ? p.change24h : null);
+                }).join('');
+            } catch(e) { /* сеть упала — оставляем прошлые значения */ }
         }
         loadTicker(); setInterval(loadTicker, 30000);
     </script>
@@ -762,6 +764,23 @@
             trackWallet();
             // фоновый watch тоже перезапускаем — сбрасываем базу сравнения
             if (getAlerts().enabled) startWatching();
+        });
+
+        // Share score: публичная карточка rustdeck.app/score/<wallet> (OG-теги, шарится в TG/X)
+        $('shareScoreBtn').addEventListener('click', async () => {
+            if (!currentWalletAddr) return;
+            const url = 'https://rustdeck.app/score/' + currentWalletAddr;
+            const text = 'My Hyperliquid wallet score on RustDeck';
+            try {
+                if (navigator.share) {
+                    await navigator.share({ title: 'RustDeck Score', text: text, url: url });
+                } else if (navigator.clipboard) {
+                    await navigator.clipboard.writeText(url);
+                    showToast('Score link copied 🔗', url, false);
+                } else {
+                    prompt('Share your score:', url);
+                }
+            } catch(e) { /* пользователь закрыл диалог шаринга — это ок */ }
         });
 
         // ===== Тумблер периода PnL (24h / 7d / 30d / All-time) =====
@@ -1374,30 +1393,48 @@
     <!-- Тосты уведомлений -->
     <div id="toastStack"></div>
 
-    <!-- Auth-модалка: Continue with RustDeck (вход через Telegram) -->
-    <div id="authModal" class="hidden fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="w-full max-w-sm bg-hyper-panel border border-hyper-border rounded-2xl p-6 shadow-2xl">
+    <!-- Auth-модалка (Hyperliquid-стиль): вход ТОЛЬКО через Google -->
+    <div id="authModal" class="hidden fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-hyper-panel border border-hyper-borderLight rounded-2xl p-6 shadow-2xl">
             <div class="text-center mb-5">
-                <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-hyper-teal/15 border border-hyper-teal/40 flex items-center justify-center text-2xl">🔐</div>
+                <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-hyper-teal/15 border border-hyper-teal/40 flex items-center justify-center text-2xl">⚡</div>
                 <div class="text-white font-bold text-lg">Sign in to RustDeck</div>
-                <div class="text-[11px] text-hyper-muted2 mt-0.5" id="authSub">Choose an account</div>
+                <div class="text-[11px] text-hyper-muted2 mt-0.5" id="authSub">One tap with Google — no passwords</div>
             </div>
             <div id="authAccounts" class="mb-3"></div>
-            <button id="authGoogleBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-white text-[#1f1f1f] hover:bg-[#eaecef] transition-colors mb-2">Continue with Google</button>
-            <button id="authTgBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-hyper-teal text-hyper-bg hover:bg-hyper-tealDim transition-colors mb-2">✈️ Continue with Telegram</button>
-            <div id="authTgBox" class="hidden mb-2">
-                <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 text-center">
-                    <div class="text-[10px] text-hyper-muted mb-1">Send <span class="font-mono text-hyper-teal">/link CODE</span> to <span class="text-hyper-teal">@RustDeckcryptobot</span></div>
-                    <div class="flex items-center justify-center gap-2 my-1">
-                        <span id="authCode" class="font-mono text-2xl font-bold text-white tracking-[0.3em]">------</span>
-                        <button id="authCopyBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border hover:text-hyper-teal hover:border-hyper-teal transition-colors">Copy</button>
-                    </div>
-                    <a id="authDeepLink" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="mt-1 block text-center text-[11px] py-1.5 rounded-md bg-hyper-teal text-hyper-bg font-bold">Open Bot &amp; Confirm</a>
-                    <div id="authStatus" class="text-[10px] text-hyper-muted2 mt-2 flex items-center justify-center gap-1.5"><span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…</div>
-                </div>
+            <button id="authGoogleBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-white text-[#1f1f1f] hover:bg-[#eaecef] transition-colors mb-2 flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.3 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.2-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-2.9-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2.1 1.4-4.8 2.2-7.7 2.2-6.3 0-11.7-3.9-13.6-9.3l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+                Continue with Google
+            </button>
+            <div class="text-[10px] text-hyper-muted text-center leading-relaxed mt-3">
+                Telegram alerts and your personal wallet are connected in Profile — right after sign-in.
             </div>
-            <button id="authEmailBtn" class="w-full text-[12px] py-2.5 rounded-lg border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors mb-2">📧 Use email instead</button>
-            <button id="authCloseBtn" class="w-full text-[11px] text-hyper-muted hover:text-white transition-colors">Cancel</button>
+            <button id="authCloseBtn" class="w-full text-[11px] text-hyper-muted hover:text-white transition-colors mt-3">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Модалка Telegram: показывает уже заполненные данные профиля (без почты) -->
+    <div id="tgModal" class="hidden fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-hyper-panel border border-hyper-borderLight rounded-2xl p-6 shadow-2xl">
+            <div class="text-center mb-4">
+                <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-hyper-teal/15 border border-hyper-teal/40 flex items-center justify-center text-2xl">✈️</div>
+                <div class="text-white font-bold text-lg">Connect Telegram</div>
+                <div class="text-[11px] text-hyper-muted2 mt-0.5">Required for DM alerts · 7 days free</div>
+            </div>
+            <div id="tgAccount" class="mb-4"></div>
+            <div id="tgSteps" class="hidden">
+                <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3">
+                    <div class="text-hyper-muted text-[10px] text-center mb-1">Send this code to the bot — <span class="font-mono text-hyper-teal">/link CODE</span></div>
+                    <div class="flex items-center justify-center gap-2 my-1">
+                        <span id="tgCode" class="font-mono text-2xl font-bold text-white tracking-[0.3em]">------</span>
+                        <button id="tgCopyBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border hover:text-hyper-teal hover:border-hyper-teal transition-colors">Copy</button>
+                    </div>
+                    <a id="tgDeepLink" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="mt-1 block text-center text-[11px] py-2 rounded-md bg-hyper-teal text-hyper-bg font-bold">Open Bot &amp; Confirm</a>
+                </div>
+                <div id="tgLinkedStatus" class="text-[10px] text-hyper-muted2 mt-2 flex items-center justify-center gap-1.5"><span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…</div>
+            </div>
+            <button id="tgConnectBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-hyper-teal text-hyper-bg hover:bg-hyper-tealDim transition-colors mb-2">🔑 Get link code</button>
+            <button id="tgModalClose" class="w-full text-[11px] text-hyper-muted hover:text-white transition-colors">Close</button>
         </div>
     </div>
 
@@ -1433,43 +1470,34 @@
                 $('signInBtn').addEventListener('click', openAuth);
                 return;
             }
-            const emailRow = profile.email
-                ? `<div class="text-hyper-muted2 text-[11px] mb-3 font-mono truncate">${esc(profile.email)}</div>`
-                : '<button id="addEmailBtn" class="w-full mb-3 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Add email — needed for linking</button>';
-            const walletRow = profile.wallet
-                ? `<div class="text-hyper-muted2 text-[11px] mb-3 font-mono truncate">★ Your wallet: ${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}</div>`
-                : '<button id="setWalletBtn" class="w-full mb-3 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Set your wallet (shown by default)</button>';
+            const displayName = profile.name || (profile.email ? profile.email.split('@')[0] : 'Trader');
+            const sub = profile.sub || null;
+            const subRow = sub
+                ? `<div class="flex items-center justify-between text-[11px] mb-2">
+                       <span class="text-hyper-muted">Subscription</span>
+                       <span class="${sub.active ? 'text-hyper-teal' : 'text-hyper-red'} font-semibold">${sub.active ? esc(sub.tier || 'trial') + ' · ' + sub.days_left + 'd left' : 'expired'}</span>
+                   </div>`
+                : '<div class="flex items-center justify-between text-[11px] mb-2"><span class="text-hyper-muted">Subscription</span><span class="text-hyper-muted2">connect Telegram →</span></div>';
             const tgRow = (profile.tg && profile.tg.username)
-                ? `<div class="flex items-center gap-1.5 text-[11px] text-hyper-teal mb-3"><span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked as @${esc(profile.tg.username)}</div>`
+                ? `<div class="flex items-center gap-1.5 text-[11px] text-hyper-teal mb-2"><span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ @${esc(profile.tg.username)} connected</div>`
                 : '';
+            const walletRow = profile.wallet
+                ? `<div class="flex items-center justify-between text-[11px] mb-2"><span class="text-hyper-muted">Your wallet</span><span class="font-mono">${esc(profile.wallet.slice(0, 6))}…${esc(profile.wallet.slice(-4))}</span></div>`
+                : '<button id="setWalletBtn" class="w-full mb-2 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Set your wallet (shown by default)</button>';
             area.innerHTML = `<div class="relative">
                 <button id="profileBtn" class="flex items-center gap-2 text-[12px]">
-                    <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc((profile.name || profile.email || '?').slice(0, 1).toUpperCase())}</span>
-                    <span class="text-hyper-text font-semibold hidden sm:inline">${esc(profile.name || profile.email)}</span>
+                    <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc(displayName.slice(0, 1).toUpperCase())}</span>
+                    <span class="text-hyper-text font-semibold hidden sm:inline">${esc(displayName)}</span>
                 </button>
                 <div id="profilePanel" class="hidden absolute right-0 top-full mt-2 w-80 bg-hyper-panel border border-hyper-border rounded-xl p-4 text-left z-50 shadow-2xl">
                     <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1">Account</div>
-                    <div class="text-white font-semibold text-sm">${esc(profile.name || 'Trader')}</div>
-                    ${emailRow}
+                    <div class="text-white font-semibold text-sm mb-1">${esc(displayName)}</div>
+                    <div class="text-[10px] text-hyper-muted2 font-mono truncate mb-3">${esc(profile.email || 'sign in with Google')}</div>
+                    ${subRow}
                     ${walletRow}
                     ${tgRow}
-                    <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1.5">Telegram alerts</div>
-                    <div class="flex gap-2 mb-2">
-                        <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="flex-1 text-center text-[11px] px-2 py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-semibold">✈️ Open bot</a>
-                        <button id="createCodeBtn" class="flex-1 text-[11px] px-2 py-2 rounded-md bg-hyper-teal/15 text-hyper-teal border border-hyper-teal/40 hover:bg-hyper-teal/25 transition-colors font-semibold">🔑 Create code</button>
-                    </div>
-                    <div id="tgLinkBox" class="hidden text-[11px] text-hyper-muted2">
-                        <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 mb-2">
-                            <div class="text-hyper-muted text-[10px] mb-1">Send this code in Telegram — write <span class="font-mono text-hyper-teal">/link CODE</span>:</div>
-                            <div class="flex items-center gap-2">
-                                <span id="tgCode" class="font-mono text-2xl font-bold text-white tracking-[0.3em]">------</span>
-                                <button id="tgCopyBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border hover:text-hyper-teal hover:border-hyper-teal transition-colors">Copy</button>
-                            </div>
-                            <a id="tgDeepLink" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="mt-2 block text-center text-[11px] py-1.5 rounded-md bg-hyper-teal text-hyper-bg font-bold">Open Bot &amp; Confirm</a>
-                        </div>
-                        <div id="tgLinkedStatus" class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…</div>
-                    </div>
-                    <button id="signOutBtn" class="mt-3 w-full text-[11px] text-hyper-muted hover:text-hyper-red transition-colors">Sign out</button>
+                    <button id="openTgModalBtn" class="w-full text-[11px] px-3 py-2 rounded-md bg-hyper-teal/15 text-hyper-teal border border-hyper-teal/40 hover:bg-hyper-teal/25 transition-colors font-semibold mb-2">✈️ ${profile.tg ? 'Manage Telegram alerts' : 'Connect Telegram alerts'}</button>
+                    <button id="signOutBtn" class="mt-1 w-full text-[11px] text-hyper-muted hover:text-hyper-red transition-colors">Sign out</button>
                 </div>
             </div>`;
             $('profileBtn').addEventListener('click', e => { e.stopPropagation(); $('profilePanel').classList.toggle('hidden'); });
@@ -1481,52 +1509,57 @@
                 renderChips();
                 applyAlertSettings();
             });
-            const addEmail = $('addEmailBtn');
-            if (addEmail) addEmail.addEventListener('click', () => {
-                const em = prompt('Your email — the RustDeck account ID for Telegram linking and future billing.\nStored in this browser only.');
-                if (!em || !em.trim()) return;
-                if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em.trim())) { alert('Please enter a valid email.'); return; }
-                profile.email = em.trim().toLowerCase();
-                saveProfile(); renderProfile();
+            $('openTgModalBtn').addEventListener('click', () => {
+                $('profilePanel').classList.add('hidden');
+                openTgModal();
             });
-            $('createCodeBtn').addEventListener('click', startTgLink);
             const setW = $('setWalletBtn');
-            if (setW) setW.addEventListener('click', () => {
-                const a = prompt('Your Hyperliquid wallet address (0x + 40 hex chars).\nSaved to your account and pre-filled next time.');
+            if (setW) setW.addEventListener('click', async () => {
+                const a = prompt('Your Hyperliquid wallet address (0x + 40 hex chars).\nSaved to your RustDeck account (and pre-filled next time).');
                 if (!a) return;
                 if (!/^0x[0-9a-fA-F]{40}$/.test(a.trim())) { alert('Invalid address format.'); return; }
                 profile.wallet = a.trim().toLowerCase();
                 profile.wallets = profile.wallets || [];
                 if (!profile.wallets.includes(profile.wallet)) profile.wallets.push(profile.wallet);
                 profile.lastWallet = profile.wallet;
-                saveProfile(); renderProfile(); renderChips();
+                saveProfile();
+                // Кошелёк уходит и на сервер (/api/profile) — виден в админке
+                try {
+                    await fetch('/api/profile', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ wallet: profile.wallet })
+                    });
+                } catch(e) {}
+                renderProfile(); renderChips();
                 $('walletAddress').value = profile.wallet;
                 trackWallet();
             });
-            $('tgCopyBtn').addEventListener('click', () => {
-                const code = $('tgCode').textContent.trim();
-                if (navigator.clipboard) navigator.clipboard.writeText(code);
-                $('tgCopyBtn').textContent = '✓ Copied';
-                setTimeout(() => { $('tgCopyBtn').textContent = 'Copy'; }, 1500);
-            });
         }
 
-        function promptSignIn() {
-            const email = prompt('Welcome to RustDeck!\n\nEnter your email — it is your account ID (Telegram linking, future billing).\nStored in this browser only — no password yet.');
-            if (!email || !email.trim()) return;
-            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { alert('Please enter a valid email.'); return; }
-            const name = prompt('Display name (optional):');
-            profile = {
-                email: email.trim().toLowerCase(),
-                name: ((name || '').trim() || email.trim().split('@')[0]).slice(0, 24),
-                wallets: [],
-                alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, sound: true },
-                lastWallet: ''
-            };
+        // ===== Данные профиля с сервера: имя, кошелёк, подписка, TG =====
+        function applyMeData(j) {
+            if (!j || !j.authenticated) return;
+            profile = profile || { name: '', email: null, wallets: [], alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true }, lastWallet: '' };
+            profile.email = j.email || profile.email;
+            profile.name = j.name || profile.name || (j.email ? j.email.split('@')[0] : 'Trader');
+            profile.wallet = j.wallet || profile.wallet;
+            profile.google = true;
+            profile.is_admin = !!j.is_admin;
+            profile.sub = j.tg ? { tier: j.tg.tier, days_left: j.tg.days_left, active: j.tg.active, expires_at: j.tg.expires_at } : null;
+            profile.tg = j.tg ? { username: j.tg.username || null, chat_id: j.tg.chat_id || null } : null;
+            if (profile.wallet) {
+                profile.wallets = profile.wallets || [];
+                if (!profile.wallets.includes(profile.wallet)) profile.wallets.push(profile.wallet);
+                if (!profile.lastWallet) profile.lastWallet = profile.wallet;
+            }
             saveProfile();
-            renderProfile();
-            renderChips();
-            applyAlertSettings();
+        }
+
+        async function refreshFromServer() {
+            try {
+                const j = await (await fetch('/api/me')).json();
+                return (j && j.authenticated) ? j : null;
+            } catch(e) { return null; }
         }
 
         // Клик вне панели профиля — закрыть её
@@ -1536,16 +1569,64 @@
             if (!panel.contains(e.target) && !e.target.closest('#profileBtn')) panel.classList.add('hidden');
         });
 
+        // ===== МОДАЛКА TELEGRAM: показывает уже заполненные данные (без почты) =====
+        function tgAccountHtml() {
+            const name = profile ? (profile.name || (profile.email ? profile.email.split('@')[0] : 'Trader')) : '—';
+            const wallet = profile && profile.wallet
+                ? profile.wallet.slice(0, 6) + '…' + profile.wallet.slice(-4)
+                : null;
+            const sub = profile && profile.sub;
+            const tg = profile && profile.tg && profile.tg.username ? '@' + profile.tg.username : null;
+            const row = (label, value) => `<div class="flex items-center justify-between"><span class="text-hyper-muted">${label}</span><span>${value}</span></div>`;
+            return `<div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 text-[11px] space-y-1.5">
+                ${row('Account', esc(name))}
+                ${row('Wallet', wallet ? '<span class="font-mono text-white">' + esc(wallet) + '</span>' : '<span class="text-hyper-muted2">not set</span>')}
+                ${row('Telegram', tg ? '<span class="text-hyper-teal font-semibold">' + esc(tg) + '</span>' : '<span class="text-hyper-yellow">not linked</span>')}
+                ${row('Subscription', sub ? (sub.active ? '<span class="text-hyper-teal font-semibold">' + esc(sub.tier || 'trial') + ' · ' + sub.days_left + 'd left</span>' : '<span class="text-hyper-red font-semibold">expired</span>') : '<span class="text-hyper-muted2">—</span>')}
+            </div>`;
+        }
+
+        async function openTgModal() {
+            if (!profile) {
+                $('authSub').textContent = 'Sign in with Google first';
+                openAuth();
+                return;
+            }
+            $('tgAccount').innerHTML = tgAccountHtml();
+            $('tgSteps').classList.add('hidden');
+            $('tgConnectBtn').disabled = false;
+            $('tgConnectBtn').textContent = profile.tg ? '🔑 New link code' : '🔑 Get link code';
+            $('tgModal').classList.remove('hidden');
+            const j = await refreshFromServer();
+            if (j) {
+                applyMeData(j);
+                $('tgAccount').innerHTML = tgAccountHtml();
+                renderProfile();
+            }
+        }
+
+        $('tgConnectBtn').addEventListener('click', () => {
+            startTgLink({ btn: 'tgConnectBtn', box: 'tgSteps', code: 'tgCode', link: 'tgDeepLink', status: 'tgLinkedStatus' });
+        });
+        $('tgCopyBtn').addEventListener('click', () => {
+            const code = $('tgCode').textContent.trim();
+            if (navigator.clipboard) navigator.clipboard.writeText(code);
+            $('tgCopyBtn').textContent = '✓ Copied';
+            setTimeout(() => { $('tgCopyBtn').textContent = 'Copy'; }, 1500);
+        });
+        $('tgModalClose').addEventListener('click', () => $('tgModal').classList.add('hidden'));
+        $('tgModal').addEventListener('click', e => { if (e.target === $('tgModal')) $('tgModal').classList.add('hidden'); });
+
         // ===== ПРИВЯЗКА TELEGRAM: сайт даёт код, юзер пишет /link CODE боту =====
         let tgPollTimer = null;
         async function startTgLink(ids) {
-            ids = ids || { btn: 'createCodeBtn', box: 'tgLinkBox', code: 'tgCode', link: 'tgDeepLink', status: 'tgLinkedStatus' };
+            ids = ids || { btn: 'tgConnectBtn', box: 'tgSteps', code: 'tgCode', link: 'tgDeepLink', status: 'tgLinkedStatus' };
             const btn = $(ids.btn);
             const box = $(ids.box);
-            if (!btn || !box) return;
+            if (!box) return;
             box.classList.remove('hidden');
             $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…';
-            btn.disabled = true;
+            if (btn) btn.disabled = true;
             try {
                 const r = await fetch('/api/tg/link/start', {
                     method: 'POST',
@@ -1563,15 +1644,18 @@
                         if (s.status === 'linked') {
                             clearInterval(tgPollTimer);
                             $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked! Check your Telegram DMs.';
-                            if (profile) {
+                            const j2 = await refreshFromServer();
+                            if (j2) applyMeData(j2);
+                            else if (profile) {
                                 profile.tg = { username: s.tg_username || null, chat_id: s.chat_id || null };
-                                if (!profile.name) profile.name = s.tg_username ? '@' + s.tg_username : 'Trader';
                                 saveProfile();
-                                renderProfile();
-                                updateTgAlertStatus();
-                                if (currentWalletAddr) registerTgWatch(currentWalletAddr);
                             }
-                            showToast('Telegram linked ✅', 'Signed in' + ((profile && profile.tg && profile.tg.username) ? ' as @' + profile.tg.username : '') + ' — trial started.', false);
+                            $('tgConnectBtn').textContent = '🔑 New link code';
+                            $('tgAccount').innerHTML = tgAccountHtml();
+                            renderProfile();
+                            updateTgAlertStatus();
+                            if (currentWalletAddr) registerTgWatch(currentWalletAddr);
+                            showToast('Telegram linked ✅', 'Alerts are on — send /watching to the bot to see your wallets', false);
                         } else if (s.status === 'expired' || s.status === 'not_found') {
                             clearInterval(tgPollTimer);
                             $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-red"></span> Code expired — create a new one.';
@@ -1581,52 +1665,36 @@
             } catch(e) {
                 alert('Network error. Try again.');
             } finally {
-                btn.disabled = false;
+                if (btn) btn.disabled = false;
             }
         }
 
-        // ===== AUTH ("Continue with RustDeck"): список аккаунтов + вход через Telegram =====
+        // ===== AUTH: Hyperliquid-стиль — вход только через Google =====
         function openAuth() {
             const modal = $('authModal');
-            $('authSub').textContent = 'Choose an account';
+            $('authSub').textContent = 'One tap with Google — no passwords';
             const acc = $('authAccounts');
-            if (profile && profile.tg && profile.tg.username) {
+            if (profile && profile.email) {
                 acc.innerHTML = `<button id="authContinueBtn" class="w-full flex items-center gap-3 bg-hyper-bg border border-hyper-teal/40 rounded-xl p-3 mb-1 hover:border-hyper-teal transition-colors text-left">
                     <span class="w-9 h-9 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc((profile.name || 'R').slice(0, 1).toUpperCase())}</span>
                     <span class="flex-1 min-w-0">
-                        <span class="block text-[12px] font-semibold text-white truncate">Continue as ${esc(profile.name || '@' + profile.tg.username)}</span>
-                        <span class="block text-[10px] text-hyper-muted2 font-mono truncate">${profile.email ? esc(profile.email) : '@' + esc(profile.tg.username)}</span>
+                        <span class="block text-[12px] font-semibold text-white truncate">Continue as ${esc(profile.name || profile.email.split('@')[0])}</span>
+                        <span class="block text-[10px] text-hyper-muted2 font-mono truncate">${esc(profile.email)}</span>
                     </span>
                     <span class="text-hyper-teal text-[11px]">→</span>
                 </button>`;
                 $('authContinueBtn').addEventListener('click', () => {
                     $('authModal').classList.add('hidden');
-                    showToast('Signed in', 'Welcome back, ' + (profile.name || '@' + profile.tg.username), false);
+                    showToast('Signed in', 'Welcome back, ' + (profile.name || profile.email.split('@')[0]), false);
                 });
             } else {
-                acc.innerHTML = '<div class="text-[11px] text-hyper-muted2 text-center bg-hyper-bg border border-hyper-border rounded-xl p-3">No saved accounts in this browser yet.</div>';
+                acc.innerHTML = '<div class="text-[11px] text-hyper-muted2 text-center bg-hyper-bg border border-hyper-border rounded-xl p-3">No account in this browser yet — sign in with Google below.</div>';
             }
-            $('authTgBox').classList.add('hidden');
             modal.classList.remove('hidden');
         }
 
-        $('authTgBtn').addEventListener('click', () => {
-            if (!profile) {
-                profile = { name: '', email: null, wallets: [], alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true }, lastWallet: '' };
-                saveProfile();
-            }
-            $('authTgBox').classList.remove('hidden');
-            startTgLink({ btn: 'authTgBtn', box: 'authTgBox', code: 'authCode', link: 'authDeepLink', status: 'authStatus' });
-        });
         // Google OAuth: уходим на /auth/google, сервер вернёт нас с cookie-сессией
         $('authGoogleBtn').addEventListener('click', () => { window.location.href = '/auth/google'; });
-        $('authCopyBtn').addEventListener('click', () => {
-            const code = $('authCode').textContent.trim();
-            if (navigator.clipboard) navigator.clipboard.writeText(code);
-            $('authCopyBtn').textContent = '✓ Copied';
-            setTimeout(() => { $('authCopyBtn').textContent = 'Copy'; }, 1500);
-        });
-        $('authEmailBtn').addEventListener('click', () => { $('authModal').classList.add('hidden'); promptSignIn(); });
         $('authCloseBtn').addEventListener('click', () => $('authModal').classList.add('hidden'));
         $('authModal').addEventListener('click', e => { if (e.target === $('authModal')) $('authModal').classList.add('hidden'); });
 
@@ -1710,7 +1778,7 @@
             } else {
                 el.innerHTML = `✈️ <button id="tgAlertConnect" class="text-hyper-teal underline decoration-dotted underline-offset-2">Connect Telegram</button> — same alerts in your DMs, 24/7`;
                 const b = $('tgAlertConnect');
-                if (b) b.addEventListener('click', openAuth);
+                if (b) b.addEventListener('click', openTgModal);
             }
         }
 
@@ -1936,18 +2004,12 @@
 
         // ===== Синхронизация с сервером: Google-cookie → профиль в браузере =====
         async function applyServerSession() {
-            try {
-                const j = await (await fetch('/api/me')).json();
-                if (!j || !j.authenticated) return;
-                if (!profile) profile = { name: '', email: null, wallets: [], alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true }, lastWallet: '' };
-                profile.email = j.email || profile.email;
-                if (j.name) profile.name = j.name;
-                profile.google = true;
-                if (j.tg) profile.tg = { username: j.tg.username || null, chat_id: j.tg.chat_id || null };
-                saveProfile();
-                renderProfile();
-                updateTgAlertStatus();
-            } catch(e) { /* сервер недоступен — остаёмся на локальном профиле */ }
+            const j = await refreshFromServer();
+            if (!j) return;
+            applyMeData(j);
+            renderProfile();
+            renderChips();
+            updateTgAlertStatus();
         }
 
         // ===== Инициализация =====

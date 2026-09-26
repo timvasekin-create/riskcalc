@@ -34,6 +34,8 @@ async def root(request: Request):
     host = (request.headers.get("host") or "").lower().split(":")[0]
     if host in ("rustdeck.app", "www.rustdeck.app"):
         return FileResponse(HUB_PATH)
+    if host.startswith("api."):
+        return _api_host_page(request)   # закрытая админка (только для нас, остальным 403)
     return FileResponse(INDEX_PATH)
 
 @app.get("/bitcoin-risk-calculator", response_class=HTMLResponse)
@@ -1105,16 +1107,20 @@ body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-co
 @app.post("/api/tg/link/start")
 async def tg_link_start(request: Request):
     """Сайт просит 6-значный код привязки. Юзер отправит его боту.
-    Тело (необязательно): {"email": "user@example.com"} — аккаунт с сайта."""
+    Email берём из Google-сессии (подделать нельзя), тело запроса — фолбэк."""
     if not BOT_ENABLED:
         return JSONResponse({"error": "bot_disabled"}, status_code=503)
     email = None
-    try:
-        body = await request.json()
-        if isinstance(body, dict):
-            email = (body.get("email") or "").strip().lower() or None
-    except Exception:
-        email = None
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if sess:
+        email = sess[0]
+    if not email:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                email = (body.get("email") or "").strip().lower() or None
+        except Exception:
+            email = None
     code = tg_bot.create_link_code(email)
     if not code:
         return JSONResponse({"error": "code_generation_failed"}, status_code=500)
@@ -1258,37 +1264,331 @@ async def auth_google_callback(request: Request, code: str = "", state: str = ""
         return RedirectResponse("/?google=failed", status_code=302)
 
     resp = RedirectResponse("/?google=ok", status_code=302)
+    host = (request.headers.get("host") or "").lower().split(":")[0]
+    cookie_domain = ".rustdeck.app" if host.endswith("rustdeck.app") else None
     resp.set_cookie(
         SESSION_COOKIE, make_session(email, name),
         max_age=SESSION_TTL, httponly=True, samesite="lax",
-        secure=(request.url.scheme == "https"),
+        secure=(request.url.scheme == "https"), domain=cookie_domain,
     )
-    resp.delete_cookie(OAUTH_STATE_COOKIE)
+    resp.delete_cookie(OAUTH_STATE_COOKIE, domain=cookie_domain)
     return resp
 
 @app.get("/api/me")
 async def api_me(request: Request):
-    """Кто вошёл (Google-cookie) + привязан ли Telegram — для профиля на хабе."""
+    """Кто вошёл (Google-cookie) + подписка/кошелёк/TG — для профиля на хабе."""
     sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
     if not sess:
         return {"authenticated": False}
     email, name = sess
-    tg = None
+    st = {"email": email, "name": None, "wallet": None, "tg": None}
     if BOT_ENABLED:
         try:
-            tg = tg_bot.subscriber_by_email(email)
+            st = tg_bot.user_status(email)
         except Exception:
-            tg = None
+            pass
     return {
         "authenticated": True,
         "email": email,
-        "name": name or email.split("@")[0],
-        "tg": tg,   # {"chat_id", "username", "tier", "expires_at"} или None
+        "name": st.get("name") or name or email.split("@")[0],
+        "wallet": st.get("wallet"),
+        "tg": st.get("tg"),   # {"chat_id", "username", "tier", "expires_at", "days_left", "active"}
+        "is_admin": is_admin(email),
     }
 
 @app.post("/api/logout")
-async def api_logout():
+async def api_logout(request: Request):
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(SESSION_COOKIE)
+    host = (request.headers.get("host") or "").lower().split(":")[0]
+    resp.delete_cookie(SESSION_COOKIE, domain=".rustdeck.app" if host.endswith("rustdeck.app") else None)
+    resp.delete_cookie(SESSION_COOKIE)   # на случай host-only cookie
     return resp
+
+
+
+# ===== API: профиль пользователя (имя + личный кошелёк) =====
+class ProfileInput(BaseModel):
+    name: Optional[str] = None
+    wallet: Optional[str] = None
+
+@app.get("/api/profile")
+async def api_profile_get(request: Request):
+    """Профиль залогиненного Google-аккаунта: имя, кошелёк, TG, подписка."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    email = sess[0]
+    st = {"email": email, "name": None, "wallet": None, "tg": None}
+    if BOT_ENABLED:
+        try:
+            st = tg_bot.user_status(email)
+        except Exception:
+            pass
+    st["is_admin"] = is_admin(email)
+    return st
+
+@app.post("/api/profile")
+async def api_profile_set(data: ProfileInput, request: Request):
+    """Сохраняет имя/кошелёк профиля в БД (не только localStorage)."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    email = sess[0]
+    wallet = (data.wallet or "").strip()
+    if wallet and not _re.fullmatch(r"0x[0-9a-fA-F]{40}", wallet):
+        return JSONResponse({"error": "invalid_wallet"}, status_code=400)
+    if not BOT_ENABLED:
+        return {"ok": True, "email": email, "name": (data.name or "").strip() or None,
+                "wallet": wallet.lower() or None}
+    prof = tg_bot.save_profile(email, data.name, wallet or None)
+    return {"ok": True, **(prof or {})}
+
+
+# ===== Админка (api.rustdeck.app): только для своих =====
+# Список админов: env ADMIN_EMAILS (через запятую) или владелец по умолчанию.
+ADMIN_EMAILS = [e.strip().lower() for e in
+                os.environ.get("ADMIN_EMAILS", "ila281510@gmail.com").split(",") if e.strip()]
+
+def is_admin(email: str) -> bool:
+    return bool(email) and email.strip().lower() in ADMIN_EMAILS
+
+def admin_session(request: Request):
+    """Сессия админа или None (обычные юзеры в админку не проходят)."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess or not is_admin(sess[0]):
+        return None
+    return sess
+
+def _admin_login_html(note: str = "") -> str:
+    """Экран входа для api-домена: чужим — 403, свои видят кнопку Google."""
+    html = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RustDeck API — restricted</title><meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+       background:#0a0e13; color:#eaecef; font-family:Inter,Arial,sans-serif; }
+.card { background:#0f1419; border:1px solid #1e252e; border-radius:16px; padding:28px 32px;
+        text-align:center; max-width:430px; width:calc(100% - 40px); }
+h1 { font-size:18px; margin:10px 0 8px; }
+p { color:#8b96a3; font-size:12px; line-height:1.65; margin:0 0 6px; }
+a.btn { display:block; margin-top:16px; background:#50d2c1; color:#0a0e13; font-weight:700;
+        padding:12px; border-radius:10px; text-decoration:none; font-size:13px; }
+small { color:#5c6670; font-size:10px; display:block; margin-top:10px; }
+.note { color:#f6465d; font-size:11px; margin-top:8px; }
+</style></head><body><div class="card">
+<div style="font-size:28px">🔒</div>
+<h1>RustDeck API — restricted area</h1>
+<p>Внутренний домен: здесь живёт админ-консоль RustDeck.<br>
+Публичные данные — цены, кошельки, рынки — на <a href="https://rustdeck.app" style="color:#50d2c1">rustdeck.app</a>.</p>
+NOTE_BLOCK
+<a class="btn" href="/auth/google">Sign in with Google</a>
+<small>Access is limited to approved accounts.</small>
+</div></body></html>"""
+    return html.replace("NOTE_BLOCK", note)
+
+def _api_host_page(request: Request):
+    """Страница api.rustdeck.app: админка для своих, 403 для остальных."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if sess and is_admin(sess[0]):
+        return HTMLResponse(_admin_page_html(sess[0]))
+    if sess:
+        note = '<div class="note">Signed in as %s — no admin access for this account.</div>' % sess[0]
+        return HTMLResponse(_admin_login_html(note), status_code=403)
+    return HTMLResponse(_admin_login_html())
+
+
+# ---- HTML админ-дашборда (api.rustdeck.app), разбит на части для читаемости ----
+_ADMIN_HTML_HEAD = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RustDeck Admin — users & subscriptions</title><meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230a0e13'/><text x='30' y='45' font-family='Arial' font-size='36' font-weight='bold' fill='%2350d2c1' text-anchor='middle'>R</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body { margin:0; background:#0a0e13; color:#eaecef; font-family:Inter,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+.wrap { max-width:1150px; margin:0 auto; padding:22px 16px 60px; }
+.head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.brand { font-weight:800; font-size:18px; letter-spacing:-0.01em; }
+.brand span.t { color:#50d2c1; } .brand span.m { color:#5c6670; font-weight:500; font-size:13px; }
+.chip { font-size:11px; font-family:monospace; color:#8b96a3; background:#0f1419; border:1px solid #1e252e; border-radius:999px; padding:5px 11px; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
+.card { background:#0f1419; border:1px solid #1e252e; border-radius:12px; padding:14px; }
+.card b { display:block; font-size:22px; font-weight:800; }
+.card span { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#5c6670; }
+.bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+input[type=text] { flex:1; min-width:220px; background:#0a0e13; border:1px solid #1e252e; border-radius:8px;
+                   padding:10px 12px; color:#eaecef; font-size:13px; font-family:monospace; }
+input[type=text]:focus { outline:none; border-color:#50d2c1; box-shadow:0 0 0 3px rgba(80,210,193,0.1); }
+button { cursor:pointer; font-weight:700; border-radius:8px; border:1px solid #1e252e; background:#0f1419;
+         color:#eaecef; font-size:12px; padding:9px 12px; font-family:inherit; transition:border-color .15s, color .15s; }
+button:hover { border-color:#50d2c1; color:#50d2c1; }
+button.primary { background:#50d2c1; color:#0a0e13; border-color:#50d2c1; }
+button.primary:hover { background:#3ba899; color:#0a0e13; }
+table { width:100%; border-collapse:collapse; font-size:12px; background:#0f1419;
+        border:1px solid #1e252e; border-radius:12px; overflow:hidden; }
+th { text-align:left; padding:10px; color:#5c6670; font-size:10px; text-transform:uppercase;
+     letter-spacing:.1em; border-bottom:1px solid #1e252e; font-weight:600; }
+td { padding:10px; border-bottom:1px solid #151a20; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.mono { font-family:monospace; }
+.badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:.04em; }
+.badge.ok { background:rgba(80,210,193,.12); color:#50d2c1; }
+.badge.bad { background:rgba(246,70,93,.12); color:#f6465d; }
+.muted { color:#8b96a3; } .dim { color:#5c6670; font-size:10px; }
+.row { display:flex; gap:6px; flex-wrap:wrap; }
+#toast { position:fixed; right:16px; bottom:16px; background:#151a20; border:1px solid #2a323d;
+         border-left:3px solid #50d2c1; border-radius:10px; padding:10px 14px; font-size:12px; display:none; z-index:9; }
+</style></head><body>"""
+
+_ADMIN_HTML_BODY = """
+<div class="wrap">
+  <div class="head">
+    <div class="brand">⚡ Rust<span class="t">Deck</span> <span class="m">admin · users &amp; subscriptions</span></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="chip">%%EMAIL%%</span>
+      <button onclick="load()">⟳ Refresh</button>
+      <button onclick="logout()">Sign out</button>
+    </div>
+  </div>
+  <div class="cards" id="cards"></div>
+  <div class="bar">
+    <input type="text" id="q" placeholder="Search: email, @telegram, wallet…" oninput="render()">
+    <button class="primary" onclick="load()">Reload users</button>
+  </div>
+  <table><thead><tr>
+    <th>User</th><th>Telegram</th><th>Wallet</th><th>Plan</th><th>Wallets / alerts</th><th>Add days</th>
+  </tr></thead><tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody></table>
+</div>
+<div id="toast"></div>
+<script>
+let USERS = [];
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtDate(ts){ return ts ? new Date(ts * 1000).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false}) : '—'; }
+function toast(msg, bad){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderLeftColor = bad ? '#f6465d' : '#50d2c1';
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 3200);
+}
+async function load(){
+  try {
+    const r = await fetch('/admin/users');
+    if (!r.ok) { toast('Access denied', true); return; }
+    const j = await r.json();
+    USERS = j.users || [];
+    render();
+  } catch(e) { toast('Network error', true); }
+}
+function render(){
+  const q = (document.getElementById('q').value || '').toLowerCase();
+  const list = USERS.filter(u => !q || [u.email, u.name, u.tg_username, u.wallet].filter(Boolean).join(' ').toLowerCase().includes(q));
+  const active = USERS.filter(u => u.active).length;
+  const totalAlerts = USERS.reduce((a, u) => a + (u.alerts || 0), 0);
+  const totalWallets = USERS.reduce((a, u) => a + (u.wallets || 0), 0);
+  document.getElementById('cards').innerHTML = [
+    ['Accounts', USERS.length], ['Active subs', active], ['Expired / no TG', USERS.length - active],
+    ['Watched wallets', totalWallets], ['Price alerts', totalAlerts],
+  ].map(pair => '<div class="card"><b>' + pair[1] + '</b><span>' + pair[0] + '</span></div>').join('');
+  document.getElementById('rows').innerHTML = list.map(u => {
+    const plan = u.tier
+      ? (u.active
+          ? '<span class="badge ok">' + esc(u.tier) + ' · ' + u.days_left + 'd left</span>'
+          : '<span class="badge bad">expired</span>')
+      : '<span class="muted">no Telegram</span>';
+    const until = u.expires_at ? '<div class="dim">until ' + fmtDate(u.expires_at) + '</div>' : '';
+    const tg = u.tg_username ? '@' + esc(u.tg_username) : '<span class="muted">—</span>';
+    const wallet = u.wallet
+      ? '<span class="mono">' + esc(u.wallet.slice(0, 8)) + '…' + esc(u.wallet.slice(-4)) + '</span>'
+      : '<span class="muted">—</span>';
+    const actions = u.chat_id
+      ? '<div class="row">' + [1, 7, 30].map(d => '<button onclick="addDays(' + u.chat_id + ',' + d + ')">+' + d + 'd</button>').join('') + '</div>'
+      : '<span class="dim">link Telegram first</span>';
+    return '<tr>'
+      + '<td><div style="font-weight:600">' + esc(u.name || '—') + '</div>'
+      + '<div class="mono muted" style="font-size:11px">' + esc(u.email || '—') + '</div></td>'
+      + '<td>' + tg + '<div class="dim mono">' + (u.chat_id || '') + '</div></td>'
+      + '<td>' + wallet + '</td>'
+      + '<td>' + plan + until + '</td>'
+      + '<td class="mono">' + (u.wallets || 0) + ' / ' + (u.alerts || 0) + '</td>'
+      + '<td>' + actions + '</td>'
+      + '</tr>';
+  }).join('') || '<tr><td colspan="6" class="muted">No users yet</td></tr>';
+}
+async function addDays(chatId, days){
+  try {
+    const r = await fetch('/admin/add_days', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({chat_id: chatId, days: days})
+    });
+    const j = await r.json();
+    if (j.ok) { toast('+' + days + 'd → ' + j.days_left + ' days left'); load(); }
+    else { toast('Failed: ' + (j.error || '?'), true); }
+  } catch(e) { toast('Network error', true); }
+}
+async function logout(){ await fetch('/api/logout', {method: 'POST'}).catch(() => {}); location.reload(); }
+load();
+setInterval(load, 60000);
+</script></body></html>"""
+
+def _admin_page_html(email: str) -> str:
+    """Дашборд админки (api.rustdeck.app): юзеры, TG, кошельки, подписка, +дни."""
+    return (_ADMIN_HTML_HEAD + _ADMIN_HTML_BODY).replace("%%EMAIL%%", email)
+
+
+class AddDaysInput(BaseModel):
+    chat_id: Optional[int] = None
+    email: Optional[str] = None
+    days: int = 7
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_home(request: Request):
+    """Админка и на основном домене (скрытый путь): только для ADMIN_EMAILS.
+    Остальным — 403, чтобы панель не была публичной."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if sess and is_admin(sess[0]):
+        return HTMLResponse(_admin_page_html(sess[0]))
+    note = ('<div class="note">Signed in as %s — no admin access for this account.</div>' % sess[0]
+            if sess else '<div class="note">Admin access only — sign in with an approved Google account.</div>')
+    return HTMLResponse(_admin_login_html(note), status_code=403)
+
+@app.get("/admin/users")
+async def admin_users(request: Request):
+    """Список аккаунтов: TG-юзер, почта, кошелёк, подписка, счётчики."""
+    sess = admin_session(request)
+    if not sess:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    users = tg_bot.list_users() if BOT_ENABLED else []
+    return {"updated": int(_time.time()), "admin": sess[0], "users": users}
+
+@app.post("/admin/add_days")
+async def admin_add_days(data: AddDaysInput, request: Request):
+    """Продлить подписку: подписка привязана к TG-аккаунту (chat_id)."""
+    if not admin_session(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not BOT_ENABLED:
+        return JSONResponse({"error": "bot_disabled"}, status_code=503)
+    return tg_bot.extend_subscription(data.chat_id, data.email, data.days)
+
+@app.middleware("http")
+async def api_host_guard(request: Request, call_next):
+    """api.rustdeck.app — внутренний домен: посторонним 403,
+    открыто только через Google-вход и админские пути."""
+    host = (request.headers.get("host") or "").lower().split(":")[0]
+    if host.startswith("api."):
+        path = request.url.path
+        allowed = (
+            path == "/" or path == "/favicon.ico"
+            or path in ("/api/me", "/api/logout")
+            or path.startswith("/auth/")
+            or path.startswith("/admin")
+        )
+        if not allowed:
+            sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+            if not sess or not is_admin(sess[0]):
+                note = '<div class="note">Private API — admin access only.</div>'
+                return HTMLResponse(_admin_login_html(note), status_code=403)
+    return await call_next(request)
+
+
 

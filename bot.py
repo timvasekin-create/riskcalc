@@ -40,6 +40,7 @@ CODE_TTL = 15 * 60      # код привязки живёт 15 минут
 WATCH_LIMIT = 5         # максимум кошельков на аккаунт (мульти-/watch)
 ALERT_LIMIT = 10        # максимум ценовых алертов на аккаунт (/alert)
 WATCH_INTERVAL = 20     # секунд между опросами кошельков (короче — быстрее уведы)
+SUBS_CHECK_INTERVAL = 3600   # раз в час: жёсткая проверка, что подписка ещё жива
 
 _db_lock = threading.Lock()
 _bot_username_cache = {"name": None, "ts": 0.0}
@@ -78,6 +79,13 @@ def init_db():
             target     REAL NOT NULL,
             created_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS profiles (
+            email      TEXT PRIMARY KEY,   -- Google-аккаунт с сайта
+            name       TEXT,
+            wallet     TEXT,               -- личный HL-кошелёк пользователя
+            created_at REAL,
+            updated_at REAL
+        );
         """)
         # Миграции: колонки отслеживаемых кошельков и email (аккаунт с сайта)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(subscribers)").fetchall()]
@@ -85,6 +93,8 @@ def init_db():
             conn.execute("ALTER TABLE subscribers ADD COLUMN watched_wallet TEXT")
         if "email" not in cols:
             conn.execute("ALTER TABLE subscribers ADD COLUMN email TEXT")
+        if "expired_notified" not in cols:
+            conn.execute("ALTER TABLE subscribers ADD COLUMN expired_notified REAL")
         lcols = [r[1] for r in conn.execute("PRAGMA table_info(links)").fetchall()]
         if "email" not in lcols:
             conn.execute("ALTER TABLE links ADD COLUMN email TEXT")
@@ -346,6 +356,199 @@ def subscriber_by_email(email):
     }
 
 
+# ============================================================
+# Подписка: жёсткая проверка + профили сайта (Google-аккаунт)
+# ============================================================
+def subscription_days_left(sub):
+    """Сколько дней осталось (None, если подписки нет вообще)."""
+    if not sub:
+        return None
+    try:
+        exp = sub["expires_at"]
+    except (KeyError, IndexError, TypeError):
+        exp = None
+    if not exp:
+        return None
+    return max(0, int((exp - time.time()) / 86400) + 1)
+
+
+def subscription_active(sub):
+    """Подписка живёт ровно пока expires_at > now — без исключений."""
+    if not sub:
+        return False
+    try:
+        exp = sub["expires_at"]
+    except (KeyError, IndexError, TypeError):
+        exp = None
+    return bool(exp and exp > time.time())
+
+
+def get_profile(email):
+    """Профиль сайта из БД (имя + личный кошелёк)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    conn = _db()
+    row = conn.execute("SELECT * FROM profiles WHERE email=?", (email,)).fetchone()
+    conn.close()
+    if not row:
+        return {"email": email, "name": None, "wallet": None}
+    return {"email": row["email"], "name": row["name"], "wallet": row["wallet"]}
+
+
+def save_profile(email, name=None, wallet=None):
+    """Профиль сайта (Google-аккаунт): имя и личный кошелёк.
+    Пустые значения = «не менять»."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    conn = _db()
+    row = conn.execute("SELECT * FROM profiles WHERE email=?", (email,)).fetchone()
+    now = time.time()
+    new_name = (name or "").strip()[:24] or (row["name"] if row else None)
+    new_wallet = (wallet or "").strip().lower() or (row["wallet"] if row else None)
+    if row:
+        conn.execute(
+            "UPDATE profiles SET name=?, wallet=?, updated_at=? WHERE email=?",
+            (new_name, new_wallet, now, email),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO profiles (email, name, wallet, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (email, new_name, new_wallet, now, now),
+        )
+    conn.commit()
+    conn.close()
+    return {"email": email, "name": new_name, "wallet": new_wallet}
+
+
+def user_status(email):
+    """Полный статус аккаунта: профиль сайта + TG-подписка (для /api/me)."""
+    email = (email or "").strip().lower()
+    prof = get_profile(email) or {"email": email, "name": None, "wallet": None}
+    sub = subscriber_by_email(email)
+    tg = None
+    if sub:
+        tg = {
+            "chat_id": sub["chat_id"],
+            "username": sub["username"],
+            "tier": sub["tier"],
+            "expires_at": sub["expires_at"],
+            "days_left": subscription_days_left(sub),
+            "active": subscription_active(sub),
+        }
+    return {"email": email, "name": prof["name"], "wallet": prof["wallet"], "tg": tg}
+
+
+def list_users():
+    """Для админ-панели: все аккаунты (site-профили + TG-подписки)."""
+    conn = _db()
+    profs = {r["email"]: dict(r) for r in conn.execute("SELECT * FROM profiles").fetchall()}
+    subs = [dict(r) for r in conn.execute("SELECT * FROM subscribers").fetchall()]
+    alerts = {r["chat_id"]: r["n"] for r in conn.execute(
+        "SELECT chat_id, COUNT(*) AS n FROM price_alerts GROUP BY chat_id").fetchall()}
+    conn.close()
+    users, used = [], set()
+    for s in subs:
+        email = (s.get("email") or "").strip().lower()
+        p = profs.get(email) or {}
+        used.add(email)
+        users.append({
+            "email": email or None,
+            "name": p.get("name") or s.get("username") or None,
+            "wallet": p.get("wallet") or None,
+            "tg_username": s.get("username"),
+            "chat_id": s.get("chat_id"),
+            "tier": s.get("tier"),
+            "expires_at": s.get("expires_at"),
+            "days_left": subscription_days_left(s),
+            "active": subscription_active(s),
+            "wallets": len(_parse_watched(s.get("watched_wallet"))),
+            "alerts": alerts.get(s.get("chat_id"), 0),
+            "linked_at": s.get("linked_at"),
+        })
+    for email, p in profs.items():
+        if not email or email in used:
+            continue
+        users.append({
+            "email": email, "name": p.get("name"), "wallet": p.get("wallet"),
+            "tg_username": None, "chat_id": None, "tier": None, "expires_at": None,
+            "days_left": None, "active": False, "wallets": 0, "alerts": 0,
+            "linked_at": p.get("created_at"),
+        })
+    users.sort(key=lambda u: (not u["active"], -(u["expires_at"] or 0)))
+    return users
+
+
+def extend_subscription(chat_id=None, email=None, days=7):
+    """Админ добавляет дни к подписке (от максимума из now/текущего срока).
+    Подписка привязана к TG-аккаунту: без chat_id продлевать нечего."""
+    try:
+        days = max(1, min(int(days or 0), 365))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "bad_days"}
+    conn = _db()
+    row = None
+    if chat_id:
+        row = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+    if row is None and email:
+        row = conn.execute(
+            "SELECT * FROM subscribers WHERE email=? ORDER BY linked_at DESC LIMIT 1",
+            ((email or "").strip().lower(),),
+        ).fetchone()
+    if row is None:
+        conn.close()
+        return {"ok": False, "error": "not_linked"}
+    base = max(time.time(), row["expires_at"] or 0)
+    new_exp = base + days * 86400
+    conn.execute(
+        "UPDATE subscribers SET expires_at=?, tier='pro', expired_notified=NULL WHERE chat_id=?",
+        (new_exp, row["chat_id"]),
+    )
+    conn.commit()
+    conn.close()
+    send_message(
+        row["chat_id"],
+        f"🎁 *Access extended* by {days} day{'s' if days > 1 else ''}.\n"
+        "Alerts are active again — happy trading!",
+    )
+    return {
+        "ok": True,
+        "chat_id": row["chat_id"],
+        "tier": "pro",
+        "expires_at": new_exp,
+        "days_left": subscription_days_left({"expires_at": new_exp}),
+    }
+
+
+def _subs_loop():
+    """Жёсткая проверка подписки: раз в час. Истёкшим — стоп алертов и одно
+    уведомление в TG; после продления всё возвращается автоматически."""
+    while True:
+        try:
+            now = time.time()
+            conn = _db()
+            rows = conn.execute(
+                "SELECT chat_id FROM subscribers "
+                "WHERE expires_at IS NOT NULL AND expires_at <= ? AND expired_notified IS NULL",
+                (now,),
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                conn = _db()
+                conn.execute("UPDATE subscribers SET expired_notified=? WHERE chat_id=?", (now, row["chat_id"]))
+                conn.commit()
+                conn.close()
+                send_message(
+                    row["chat_id"],
+                    "⌛ *Your subscription has ended* — alerts and commands are paused.\n"
+                    "Ask the RustDeck team to add days: everything resumes instantly.",
+                )
+        except Exception:
+            pass
+        time.sleep(SUBS_CHECK_INTERVAL)
+
+
 def _watch_loop():
     """Фоновый цикл: раз в 60с опрашивает отслеживаемые кошельки подписчиков."""
     cache = {}  # addr -> snapshot
@@ -353,7 +556,7 @@ def _watch_loop():
         try:
             conn = _db()
             rows = conn.execute(
-                "SELECT chat_id, watched_wallet FROM subscribers WHERE watched_wallet IS NOT NULL"
+                "SELECT chat_id, watched_wallet, expires_at FROM subscribers WHERE watched_wallet IS NOT NULL"
             ).fetchall()
             conn.close()
 
@@ -361,6 +564,8 @@ def _watch_loop():
             # даже если за кошельком следят несколько юзеров
             subs_map = {}
             for row in rows:
+                if not subscription_active(row):
+                    continue  # подписка кончилась — алерты не шлём (ждёт продления)
                 for a in _parse_watched(row["watched_wallet"]):
                     subs_map.setdefault(a, set()).add(row["chat_id"])
             # чистим кэш по адресам, которые больше никто не отслеживает
@@ -430,10 +635,15 @@ def _watch_loop():
             try:
                 conn = _db()
                 pa = conn.execute("SELECT rowid, chat_id, sym, op, target FROM price_alerts").fetchall()
+                active_ids = {r["chat_id"] for r in conn.execute(
+                    "SELECT chat_id FROM subscribers WHERE expires_at IS NOT NULL AND expires_at > ?",
+                    (time.time(),)).fetchall()}
                 conn.close()
                 if pa:
-                    prices = _hl_prices({a["sym"] for a in pa})
+                    prices = _hl_prices({a["sym"] for a in pa if a["chat_id"] in active_ids})
                     for a in pa:
+                        if a["chat_id"] not in active_ids:
+                            continue  # подписка истекла — алерт не отправляем
                         p = prices.get(a["sym"])
                         if p is None:
                             continue
@@ -715,10 +925,18 @@ def _cmd_alert(chat_id, username, text):
         return
     sym, op, target = m.group(1).upper(), m.group(2), float(m.group(3))
     conn = _db()
-    sub = conn.execute("SELECT 1 FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+    sub = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
     if not sub:
         conn.close()
         send_message(chat_id, "First link your account: sign in on rustdeck.app → “Create link code” → send me `/link <code>`.")
+        return
+    if not subscription_active(sub):
+        conn.close()
+        send_message(
+            chat_id,
+            "⌛ *Your subscription has ended* — alerts are paused.\n"
+            "Ask the RustDeck team to add days: everything resumes instantly.",
+        )
         return
     cnt = conn.execute("SELECT COUNT(*) FROM price_alerts WHERE chat_id=?", (chat_id,)).fetchone()[0]
     if cnt >= ALERT_LIMIT:
@@ -818,6 +1036,14 @@ def _cmd_watch(chat_id, username, text):
         send_message(
             chat_id,
             "First link your account: sign in on rustdeck.app → “Create link code” → send me `/link <code>`.",
+        )
+        return
+    if not subscription_active(sub):
+        conn.close()
+        send_message(
+            chat_id,
+            "⌛ *Your subscription has ended* — watching is paused.\n"
+            "Ask the RustDeck team to add days: your wallets and alerts resume instantly.",
         )
         return
     current = _parse_watched(sub["watched_wallet"])
@@ -1064,5 +1290,6 @@ def start_bot_thread():
     init_db()
     threading.Thread(target=_poll_loop, daemon=True, name="rustdeck-tg-bot").start()
     threading.Thread(target=_watch_loop, daemon=True, name="rustdeck-tg-watch").start()
+    threading.Thread(target=_subs_loop, daemon=True, name="rustdeck-tg-subs").start()
     return True
 

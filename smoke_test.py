@@ -120,6 +120,69 @@ try:
     except Exception as e:
         log("TG watch bridge WARN:", repr(e))
 
+    # api.rustdeck.app — закрытый домен: гостю только экран входа, API закрыт
+    try:
+        req = urllib.request.Request(BASE + "/", headers={"Host": "api.rustdeck.app"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            body = r.read().decode("utf-8", "replace")
+        ok = r.status == 200 and "restricted" in body and "Sign in with Google" in body
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} API HOST /: {r.status} — экран входа (админка закрыта)")
+    except Exception as e:
+        log("API HOST / WARN:", repr(e))
+    for path in ("/admin/users", "/api/whales"):
+        try:
+            req = urllib.request.Request(BASE + path, headers={"Host": "api.rustdeck.app"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                fails += 1
+                log(f"FAIL API HOST {path}: {r.status} (ожидаем 403 для гостя)")
+        except urllib.error.HTTPError as e:
+            ok = e.code == 403
+            if not ok:
+                fails += 1
+            log(f"{'OK ' if ok else 'FAIL'} API HOST {path}: {e.code} (ожидаемо 403)")
+        except Exception as e:
+            log(f"API HOST {path} WARN:", repr(e))
+
+    # /api/profile без Google-сессии — 401
+    try:
+        status, body = get("/api/profile", timeout=8)
+        fails += 1
+        log(f"FAIL PROFILE API: {status} без сессии (ожидаем 401)")
+    except urllib.error.HTTPError as e:
+        ok = e.code == 401
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} PROFILE API: {e.code} (без сессии ожидаем 401)")
+    except Exception as e:
+        log("PROFILE API WARN:", repr(e))
+
+    # Админ-дашборд рендерится без ошибок (шаблон проверяем напрямую)
+    try:
+        import main as _main
+        html_admin = _main._admin_page_html("ila281510@gmail.com")
+        assert "admin/users" in html_admin and "admin/add_days" in html_admin, "нет эндпоинтов в админке"
+        assert "Add days" in html_admin and "ila281510@gmail.com" in html_admin, "нет колонки добавления дней"
+        assert _main.is_admin("ila281510@gmail.com") and not _main.is_admin("random@example.com"), "whitelist админов сломан"
+        log("ADMIN HTML OK: дашборд рендерится, whitelist работает")
+    except Exception as e:
+        fails += 1
+        log("ADMIN HTML FAIL:", repr(e))
+
+    # Основной домен: /admin тоже закрыт для гостя (панель не публичная)
+    try:
+        urllib.request.urlopen(BASE + "/admin", timeout=8)
+        fails += 1
+        log("FAIL ADMIN MAIN HOST: 200 без админ-сессии (панель открыта!)")
+    except urllib.error.HTTPError as e:
+        ok = e.code == 403
+        if not ok:
+            fails += 1
+        log(f"{'OK ' if ok else 'FAIL'} ADMIN MAIN HOST: {e.code} (ожидаемо 403 для гостя)")
+    except Exception as e:
+        log("ADMIN MAIN HOST WARN:", repr(e))
+
     _, sm = get("/sitemap.xml")
     for p in ["/ethereum-risk-calculator", "/liquidation-calculator", "/leverage-calculator", "/solana-risk-calculator"]:
         assert p in sm, f"sitemap не содержит {p}"
@@ -141,7 +204,8 @@ try:
                  "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "refreshWalletBtn",
                  "chartBlock", "chartToggles", "pnlChart", "stPF",
                  "scoreBlock", "scoreGrade", "followTgBtn", "startTgLink", "tgDeepLink",
-                 "chartTabs", "chartTip", "authModal", "authTgBtn", "evOrders", "side-rail",
+                 "chartTabs", "chartTip", "authModal", "authGoogleBtn", "tgModal", "tgConnectBtn",
+                 "shareScoreBtn", "evOrders", "side-rail",
                  "calcTicker", "calcChart", "loadCalcTicker", "setWalletBtn",
                  "authGoogleBtn", "convCoin", "calcCopyBtn", "calcHlBtn", "tgAlertStatus", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
@@ -448,8 +512,47 @@ try:
         finally:
             _bot.BOT_TOKEN = _saved_token
 
+        # Профиль сайта (Google-аккаунт) хранится в БД и отдаётся в /api/me
+        _bot.save_profile("Tester@Example.com", name="Tester", wallet="0x" + "9" * 40)
+        prof = _bot.get_profile("tester@example.com")
+        assert prof["name"] == "Tester" and prof["wallet"] == "0x" + "9" * 40, f"профиль не сохранился: {prof}"
+        st = _bot.user_status("tester@example.com")
+        assert st["wallet"] == "0x" + "9" * 40, f"user_status без кошелька: {st}"
+        log("PROFILE OK: имя и кошелёк профиля хранятся в БД")
+
+        # Жёсткая проверка подписки: истёкшая — блокирует /watch и алерты
+        conn = _bot._db()
+        conn.execute("UPDATE subscribers SET expires_at=? WHERE chat_id=?", (time.time() - 10, 888001))
+        conn.commit()
+        sub_exp = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (888001,)).fetchone()
+        conn.close()
+        assert not _bot.subscription_active(sub_exp), "истёкшая подписка должна быть inactive"
+        _bot.handle_update(_msg("/watch 0x" + "3" * 40, chat=888001))
+        conn = _bot._db()
+        w_exp = conn.execute("SELECT watched_wallet FROM subscribers WHERE chat_id=?", (888001,)).fetchone()
+        conn.close()
+        assert "0x" + "3" * 40 not in (w_exp["watched_wallet"] or ""), "истёкшая подписка не должна добавлять кошельки"
+        log("SUBS OK: истёкшая подписка блокирует /watch (жёсткая проверка)")
+
+        # Админ добавляет дни — подписка снова активна
+        ext = _bot.extend_subscription(chat_id=888001, days=7)
+        assert ext.get("ok") and ext.get("days_left") >= 7, f"extend_subscription: {ext}"
+        conn = _bot._db()
+        sub_ok = conn.execute("SELECT * FROM subscribers WHERE chat_id=?", (888001,)).fetchone()
+        conn.close()
+        assert _bot.subscription_active(sub_ok), "после продления подписка должна быть active"
+        log(f"SUBS OK: админ добавил дни — снова active ({ext['days_left']}d, tier={ext['tier']})")
+
+        # Админка: список юзеров отдаёт почту, TG, кошелёк и подписку
+        users = _bot.list_users()
+        me_admin = next((u for u in users if u.get("chat_id") == 888001), None)
+        assert me_admin, f"list_users не нашёл тестовый TG-аккаунт: {users[:3]}"
+        assert me_admin.get("tg_username"), f"нет TG-юзернейма: {me_admin}"
+        log("ADMIN OK: list_users отдаёт TG-юзера, почту, кошелёк и подписку")
+
         conn = _bot._db()
         conn.execute("DELETE FROM subscribers WHERE chat_id IN (888001, 888002)")
+        conn.execute("DELETE FROM profiles WHERE email='tester@example.com'")
         conn.commit()
         conn.close()
 

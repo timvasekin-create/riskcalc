@@ -239,8 +239,27 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   кошелёк в слежение (лимит 5, дедуп) и бот пишет «👀 Website: now watching…».
 - Сторона сделки больше не «A/B» (в HL это Ask/Bid): API отдаёт side_label
   (A → Short, B → Long), лента/таблицы/CSV на сайте и сообщения бота показывают Long/Short.
-- Бот: WATCH_INTERVAL = 20 секунд вместо 60 — уведомления приходят почти мгновенно
-  (в /watch текст «Checks every {WATCH_INTERVAL} seconds»).
+- Бот: интервал слежения WATCH_INTERVAL = 20 секунд (было 60) — уведомления приходят
+  почти мгновенно; в /watch текст «Checks every {WATCH_INTERVAL} seconds».
+- ПОДПИСКА (жёсткая): подписка живёт ровно пока expires_at > now. Раз в час фоновый
+  _subs_loop() проверяет всех: истёкшим — одно уведомление и полная блокировка
+  (алерты не шлются, /watch и /alert отвечают «subscription has ended»).
+  Админ добавляет дни → extend_subscription() ставит tier=pro и снимает expired_notified,
+  всё возвращается само. Подписка привязана к TG-аккаунту (chat_id), почта — вторична.
+- АВТОРИЗАЦИЯ v2 (Hyperliquid-стиль): в модалке только Continue with Google
+  (Telegram/email-кнопки убраны). После входа в профиле: подписка, свой кошелёк,
+  «Connect Telegram» → отдельная модалка #tgModal с уже заполненными данными
+  (Account / Wallet / Telegram / Subscription) — без почты. Профиль хранится в БД
+  (таблица profiles: email, name, wallet) и отдаётся через GET/POST /api/profile.
+- АДМИНКА на api.rustdeck.app: домен закрыт (гостю — экран входа, чужим 403, сам
+  /api/* на api-домене тоже 403). Для админов (ADMIN_EMAILS, по умолчанию
+  ila281510@gmail.com) — дашборд: юзер, TG-юзернейм, почта, кошелёк, подписка
+  (tier, дней осталось, active), счётчики кошельков/алертов, кнопки +1/+7/+30 дней.
+  Эндпоинты: GET /admin/users, POST /admin/add_days.
+- ТИКЕР: HYPE теперь с 24ч-% (данные берём со своего /api/prices, где процент
+  считается по часовой свече 24ч назад) — раньше был прочерк.
+- SHARE SCORE: кнопка «🔗 Share score» рядом с кошельком — копирует ссылку
+  rustdeck.app/score/<wallet> (Web Share API на телефонах, иначе clipboard).
 - АВТОРИЗАЦИЯ: Google OAuth 2.0 (stdlib): /auth/google → Google → /auth/google/callback
   → cookie `rd_session` (HMAC-подпись, 30 дней) → GET /api/me отдаёт email/имя и
   привязанный TG. POST /api/logout. Кнопка «Continue with Google» в auth-модалке;

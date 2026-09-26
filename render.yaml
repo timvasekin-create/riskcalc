@@ -36,3 +36,6 @@ services:
       # Подпись cookie-сессии (любая длинная случайная строка, напр. openssl rand -hex 32)
       - key: APP_SECRET
         sync: false
+      # Админы админки api.rustdeck.app (email через запятую; по умолчанию — владелец)
+      - key: ADMIN_EMAILS
+        sync: false
