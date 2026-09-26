@@ -235,16 +235,22 @@ def start_sync_loop(db_path: str) -> bool:
     def loop():
         last_sig = None
         last_beat = 0.0
+        streak = 0
         while True:
             try:
                 sig = _signature(db_path)
                 now = time.time()
                 if sig and (sig != last_sig or now - last_beat > HEARTBEAT):
                     if push(db_path, force=True):
-                        last_sig, last_beat = sig, now
+                        last_sig, last_beat, streak = sig, now, 0
+                    else:
+                        # Ошибка (например, неверный токен): тормозим с ростом
+                        # паузы, чтобы не долбить GitHub и не спамить логи
+                        streak = min(streak + 1, 6)
             except Exception as e:
                 _note_error(e)
-            time.sleep(CHECK_INTERVAL)
+                streak = min(streak + 1, 6)
+            time.sleep(CHECK_INTERVAL * (2 ** streak) if streak else CHECK_INTERVAL)
 
     threading.Thread(target=loop, daemon=True).start()
     return True
