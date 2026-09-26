@@ -22,3 +22,15 @@ uv_out.txt
 uv_err.txt
 py_test.txt
 env_out.txt
+
+# Черновики одноразовых проверок (чтобы не попадали в git)
+_*.txt
+brace*.txt
+cyr.txt
+s1.txt
+s2.txt
+st_final.txt
+lg_final.txt
+diffstat.txt
+status*.txt
+b_syn.txt
