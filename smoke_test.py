@@ -61,24 +61,37 @@ try:
     # ===== Алерты «ордер снят»: направление + снятые вместе TP/SL =====
     # Формат перенесён с основного бота владельца (был русский, стал английский):
     # в сообщении есть Long/Short, цена, объём в монете и USD, а тейк/стоп,
-    # ушедшие в том же цикле, перечисляются блоком «Removed together».
+    # ушедшие в одном окне, перечисляются блоком «Removed together».
     try:
         import bot as _bot_fmt
-        _main_o = {"oid": 86, "coin": "LTC", "side": "B", "side_label": "Long", "px": 62.0,
-                   "sz": 3.3, "notional": 204.6, "type": "Limit", "is_tp": False, "is_sl": False}
-        _tp = {"oid": 87, "coin": "LTC", "side": "A", "side_label": "Short", "px": 77.0,
-               "sz": 3.3, "notional": 254.1, "type": "Take Profit", "is_tp": True, "is_sl": False}
-        _sl = {"oid": 88, "coin": "LTC", "side": "A", "side_label": "Short", "px": 60.0,
-               "sz": 3.3, "notional": 199.6, "type": "Stop Loss", "is_tp": False, "is_sl": True}
+        _main_o = {"oid": 86, "coin": "LTC", "side": "B", "side_label": "Long", "dir_label": "Long",
+                   "px": 62.0, "sz": 3.3, "notional": 204.6, "type": "Limit",
+                   "is_tp": False, "is_sl": False}
+        # Тейк/стоп ЛОНГА: в HL это продажа (сторона A), но для юзера это Long
+        _tp = {"oid": 87, "coin": "LTC", "side": "A", "side_label": "Short", "dir_label": "Long",
+               "px": 77.0, "sz": 3.3, "notional": 254.1, "type": "Take Profit",
+               "is_tp": True, "is_sl": False}
+        _sl = {"oid": 88, "coin": "LTC", "side": "A", "side_label": "Short", "dir_label": "Long",
+               "px": 60.0, "sz": 3.3, "notional": 199.6, "type": "Stop Loss",
+               "is_tp": False, "is_sl": True}
         msg = _bot_fmt._order_removed_text(_main_o, [_tp, _sl])
         for must in ["ORDER REMOVED", "#86", "*LTC · LONG*", "$62", "3.3 LTC", "$204.60",
                      "Removed together:", "🎯 Take Profit — $77", "🛑 Stop Loss — $60"]:
             assert must in msg, f"в сообщении «ордер снят» нет {must!r}:\n{msg}"
+        assert "SHORT" not in msg, f"у лонга не должно быть метки SHORT:\n{msg}"
         solo = _bot_fmt._order_removed_text(_main_o, [])
         assert "Removed together" not in solo, "блок TP/SL не должен появляться без них"
-        only_exits = _bot_fmt._order_removed_text(_tp, [_sl])
-        assert "*LTC · SHORT*" in only_exits and "Stop Loss" in only_exits, "нет направления/стопа"
-        log("ORDER ALERT OK: «ордер снят» — LONG/SHORT + объём + блок Removed together (TP/SL)")
+        # Направление берём от позиции: TP/SL лонга — Long, даже если ордер на продажу
+        assert _bot_fmt._order_dir_label({"side": "A", "reduceOnly": True}, "Take Profit", "Long") == "Long"
+        assert _bot_fmt._order_dir_label({"side": "A"}, "Take Profit", "") == "Long"   # позиции нет: продажа = закрытие лонга
+        assert _bot_fmt._order_dir_label({"side": "B", "reduceOnly": True}, "Stop Loss", "Short") == "Short"
+        assert _bot_fmt._order_dir_label({"side": "A"}, "Limit", "") == "Short"        # вход в шорт — по стороне ордера
+        # Группировка: TP+SL без основного ордера → один блок, главный — тейк
+        pairs = _bot_fmt._removal_pairs([_sl, _tp])
+        assert len(pairs) == 1 and pairs[0][0] is _tp and pairs[0][1] == [_sl], f"группировка TP/SL: {pairs}"
+        pairs2 = _bot_fmt._removal_pairs([_main_o, _tp, _sl])
+        assert len(pairs2) == 1 and pairs2[0][0] is _main_o and set(x["oid"] for x in pairs2[0][1]) == {87, 88}, f"группировка с лимиткой: {pairs2}"
+        log("ORDER ALERT OK: «ордер снят» — Long/Short от позиции + блок Removed together (TP/SL)")
     except AssertionError as e:
         fails += 1
         log("ORDER ALERT FAIL:", str(e))
@@ -99,7 +112,12 @@ try:
                                         "triggerPx": "77", "side": "A"}, 70.0)[1] is True
         assert _main_oc._classify_order({"orderType": "Trigger", "isTrigger": True,
                                         "triggerPx": "60", "side": "A"}, 70.0)[2] is True
-        log("ORDER KIND OK: Take Profit / Stop Loss / Limit распознаются верно")
+        # Направление: у лонга TP/SL помечаются Long (метка берётся от позиции)
+        assert _main_oc._order_dir_label({"side": "A", "reduceOnly": True}, "Take Profit", "long") == "Long"
+        assert _main_oc._order_dir_label({"side": "A"}, "Stop Loss", "") == "Long"
+        assert _main_oc._order_dir_label({"side": "B"}, "Limit", "") == "Long"
+        assert _main_oc._order_dir_label({"side": "A"}, "Limit", "") == "Short"
+        log("ORDER KIND OK: Take Profit / Stop Loss / Limit и направление от позиции")
     except AssertionError as e:
         fails += 1
         log("ORDER KIND FAIL:", str(e))

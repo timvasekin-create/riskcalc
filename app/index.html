@@ -1884,17 +1884,39 @@
             } catch(e) {}
         }
 
+        // Склейка снятых ордеров: TP и SL могут уйти с разницей в один цикл
+        // опроса — тогда доклеиваем их к последней строке по этой монете
+        const ORDER_GROUP_WINDOW = 25000;
+        const lastRemovalRow = {};   // groupKey -> {el, main, orders, t}
+        function feedRowHtml(time, title, text, bad) {
+            return `<span class="text-hyper-muted font-mono text-[10px] mr-2">${time}</span>`
+                 + `<span class="${bad ? 'text-hyper-red' : 'text-hyper-teal'} font-semibold">${esc(title)}</span> `
+                 + `<span class="text-hyper-muted2">${esc(text)}</span>`;
+        }
         function addFeedItem(ev) {
             const feed = $('alertsFeed');
             feed.classList.remove('hidden');
-            const div = document.createElement('div');
-            div.className = 'alert-feed-item';
             const bad = ev.type === 'liq' || ev.type === 'close_loss';
             const time = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-            const text = ev.feed || ev.text;   // лента — однострочная версия алерта
-            div.innerHTML = `<span class="text-hyper-muted font-mono text-[10px] mr-2">${time}</span><span class="${bad ? 'text-hyper-red' : 'text-hyper-teal'} font-semibold">${esc(ev.title)}</span> <span class="text-hyper-muted2">${esc(text)}</span>`;
+            const now = Date.now();
+            if (ev.groupKey) {
+                const row = lastRemovalRow[ev.groupKey];
+                if (row && now - row.t < ORDER_GROUP_WINDOW) {
+                    row.orders.push(...(ev.groupOrders || []));
+                    row.t = now;
+                    row.el.innerHTML = feedRowHtml(time, ev.title, orderRemovedFeed(row.main, row.orders), bad);
+                    return;
+                }
+            }
+            const div = document.createElement('div');
+            div.className = 'alert-feed-item';
+            div.innerHTML = feedRowHtml(time, ev.title, ev.feed || ev.text, bad);
             feed.prepend(div);
             while (feed.children.length > 20) feed.removeChild(feed.lastChild);
+            if (ev.groupKey) {
+                lastRemovalRow[ev.groupKey] = {el: div, main: ev.groupMain,
+                                               orders: (ev.groupOrders || []).slice(), t: now};
+            }
         }
     </script>
     <script>
@@ -1919,12 +1941,17 @@
             const usd = o.notional ? ` ($${fmtUsd(o.notional)})` : '';
             return sz ? `${fmtPrice(sz)} ${o.coin}${usd}` : '';
         }
+        function orderDir(o) {
+            // Направление ПОЗИЦИИ: у лонга TP/SL продаются (HL: сторона A),
+            // но юзер ставил их к лонгу — поэтому dir_label из API
+            return (o.dir_label || o.side_label || o.side || '').toUpperCase();
+        }
         function orderShortLine(o) {
             const amt = orderAmount(o);
             return `${o.type || 'Order'} — $${fmtPrice(o.price)}` + (amt ? ' · ' + amt : '');
         }
         function orderRemovedText(main, others) {
-            const dir = (main.side_label || main.side || '').toUpperCase();
+            const dir = orderDir(main);
             const emoji = dir === 'LONG' ? '🟢' : (dir === 'SHORT' ? '🔴' : '');
             const lines = [
                 `${main.coin} · ${dir} ${emoji}`.trim(),
@@ -1939,7 +1966,7 @@
             return lines.join('\n');
         }
         function orderRemovedFeed(main, others) {
-            const dir = (main.side_label || main.side || '').toUpperCase();
+            const dir = orderDir(main);
             const tail = (others && others.length)
                 ? ' · removed together: ' + others.map(orderShortLine).join('; ')
                 : '';
@@ -2005,29 +2032,37 @@
                 const o = nowOrd[k];
                 const kind = o.type || (o.is_trigger ? 'Trigger' : 'Limit');
                 events.push({ type: 'order', title: '🧾 ' + kind + ' placed',
-                              text: `${o.coin} ${o.side_label || o.side} · ${fmtPrice(o.remaining || o.size)} @ $${fmtPrice(o.price)}` });
+                              text: `${o.coin} ${o.dir_label || o.side_label || o.side} · ${fmtPrice(o.remaining || o.size)} @ $${fmtPrice(o.price)}` });
             });
-            // Снятие: что ушло в этом же цикле по монете и направлению — вместе.
-            // Если с ордером снялись тейк/стоп, прикладываем их блоком.
+            // Снятие: TP и SL часто уходят с разницей в один цикл опроса —
+            // группируем по монете и направлению позиции и даём ленте склеить
+            // строки в окне ORDER_GROUP_WINDOW (см. addFeedItem).
             const byGroup = {};
             Object.keys(prevOrd).forEach(k => {
                 if (nowOrd[k]) return;
                 const o = prevOrd[k];
-                const gk = o.coin + '|' + (o.side_label || o.side);
+                const gk = o.coin + '|' + orderDir(o);
                 (byGroup[gk] = byGroup[gk] || []).push(o);
             });
             Object.keys(byGroup).forEach(gk => {
                 const group = byGroup[gk];
                 const exits = group.filter(o => o.is_tp || o.is_sl);
                 const mains = group.filter(o => !(o.is_tp || o.is_sl));
-                const pairs = (mains.length ? mains : [group[0]])
-                    .map(m => [m, mains.length ? exits : group.filter(x => x !== m)]);
+                let pairs;
+                if (mains.length) {
+                    pairs = mains.map(m => [m, exits.slice()]);
+                } else {
+                    // снялись только тейк/стоп: главным делаем тейк (цель)
+                    const ordered = group.slice().sort((a, b) => (a.is_tp ? 0 : 1) - (b.is_tp ? 0 : 1));
+                    pairs = [[ordered[0], ordered.slice(1)]];
+                }
                 pairs.forEach(([main, others]) => {
                     events.push({
                         type: 'order',
                         title: '🗑 Order removed' + (main.oid !== null && main.oid !== undefined ? ' #' + main.oid : ''),
                         text: orderRemovedText(main, others),   // тост/уведомление: многострочно
                         feed: orderRemovedFeed(main, others),   // лента: одной строкой
+                        groupKey: gk, groupMain: main, groupOrders: others,
                     });
                 });
             });

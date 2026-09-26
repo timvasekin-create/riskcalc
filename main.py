@@ -416,6 +416,20 @@ def _side_label(side) -> str:
     return side or "—"
 
 
+def _order_dir_label(o: dict, kind: str, pos_side: str = "") -> str:
+    """Направление ордера для алертов: Long/Short.
+    Тонкость: у ЛОНГА тейк/стоп — это продажа (HL: сторона A), но юзер ставил
+    их к лонгу, поэтому направление берём от ПОЗИЦИИ. Если позиции уже нет
+    (закрылась), выводим из стороны ордера: продажа закрывала лонг → Long."""
+    closing = bool(o.get("reduceOnly")) or kind in ("Take Profit", "Stop Loss")
+    if closing:
+        label = (pos_side or "").capitalize()
+        if label in ("Long", "Short"):
+            return label
+        return "Long" if (o.get("side") or "").upper() == "A" else "Short"
+    return _side_label(o.get("side"))
+
+
 def _classify_order(o: dict, mark_px: float = 0.0):
     """Тип ордера для алертов: (kind, is_tp, is_sl).
     HL отдаёт orderType ('Take Profit Market', 'Stop Limit', …) — этого обычно
@@ -550,7 +564,10 @@ async def api_wallet(address: str, request: Request):
 
     # Открытые ордера (лимитки, TP/SL, стопы).
     # Отдаём всё, что нужно для алертов «ордер снят»: номер (oid), тип
-    # (Take Profit / Stop Loss / Limit), цену, размер в монете и в USD.
+    # (Take Profit / Stop Loss / Limit), цену, размер в монете и в USD,
+    # а также dir_label — направление ПОЗИЦИИ (у лонга TP/SL продаются,
+    # но для юзера это Long, а не Short).
+    pos_side_by_coin = {p["coin"]: p.get("side") for p in positions}
     mark_by_coin = {p["coin"]: p.get("mark") or 0 for p in positions}
     open_orders = []
     for o in orders or []:
@@ -558,11 +575,13 @@ async def api_wallet(address: str, request: Request):
             price = float(o.get("limitPx") or o.get("triggerPx") or 0)
             remaining = float(o.get("sz") or 0)
             kind, is_tp, is_sl = _classify_order(o, mark_by_coin.get(o.get("coin"), 0.0))
+            dir_label = _order_dir_label(o, kind, pos_side_by_coin.get(o.get("coin"), ""))
             open_orders.append({
                 "oid": o.get("oid"),
                 "coin": o.get("coin"),
                 "side": o.get("side"),
                 "side_label": _side_label(o.get("side")),
+                "dir_label": dir_label,
                 "size": float(o.get("origSz") or o.get("sz") or 0),
                 "remaining": remaining,
                 "notional": round(remaining * price, 2),

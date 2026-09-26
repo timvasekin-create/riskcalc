@@ -41,6 +41,8 @@ WATCH_LIMIT = 5         # максимум кошельков на аккаун�
 ALERT_LIMIT = 10        # максимум ценовых алертов на аккаунт (/alert)
 WATCH_INTERVAL = 20     # секунд между опросами кошельков (короче — быстрее уведы)
 SUBS_CHECK_INTERVAL = 3600   # раз в час: жёсткая проверка, что подписка ещё жива
+ORDER_GROUP_WINDOW = 25      # окно склейки снятых ордеров (TP и SL могут уйти
+                             # с разницей в один цикл — шлём одним блоком)
 
 _db_lock = threading.Lock()
 _bot_username_cache = {"name": None, "ts": 0.0}
@@ -184,6 +186,21 @@ def _order_kind(o, mark_px=0.0):
     return ("Take Profit", True, False) if is_tp else ("Stop Loss", False, True)
 
 
+def _order_dir_label(o, kind, pos_side=""):
+    """Направление ордера для алертов: Long/Short.
+    У ЛОНГА тейк/стоп — это продажа (HL: сторона A), но юзер ставил их к лонгу,
+    поэтому направление берём от ПОЗИЦИИ. Если позиции уже нет, выводим из
+    стороны ордера: продажа закрывала лонг → Long (иначе получалось «SHORT»
+    на тейке лонга — баг, который ловил владелец)."""
+    closing = bool(o.get("reduceOnly")) or kind in ("Take Profit", "Stop Loss")
+    if closing:
+        label = (pos_side or "").capitalize()
+        if label in ("Long", "Short"):
+            return label
+        return "Long" if (o.get("side") or "").upper() == "A" else "Short"
+    return _side_label(o.get("side"))
+
+
 def _order_line(o):
     """Строка ордера: 'Take Profit — $77 · 3.3 LTC ($254.10)'."""
     kind = o.get("type") or "Order"
@@ -194,13 +211,26 @@ def _order_line(o):
     return f"{kind} — ${_fmt_small(o.get('px'))}" + (f" · {tail}" if tail else "")
 
 
+def _removal_pairs(group):
+    """Снятые ордера → пары (главный, [снятые вместе]).
+    Есть обычные ордера (лимитки) — каждый становится главным, а тейк/стоп
+    попадают в блок «Removed together». Если снялись только тейк/стоп —
+    главным делаем тейк (цель сделки), стоп уходит в блок."""
+    exits = [x for x in group if x.get("is_tp") or x.get("is_sl")]
+    mains = [x for x in group if not (x.get("is_tp") or x.get("is_sl"))]
+    if mains:
+        return [(m, list(exits)) for m in mains]
+    ordered = sorted(group, key=lambda x: (not x.get("is_tp"), x.get("oid") or 0))
+    return [(ordered[0], ordered[1:])] if ordered else []
+
+
 def _order_removed_text(main, others=None):
-    """Сообщение «ордер снят»: направление (Long/Short), цена и объём, а если
-    в том же цикле снялись тейк/стоп — они перечисляются блоком.
+    """Сообщение «ордер снят»: направление ПОЗИЦИИ (Long/Short), цена и объём,
+    а если в том же окне снялись тейк/стоп — они перечисляются блоком.
     Формат перенесён с основного бота владельца (был русский — стал английский)."""
     others = others or []
     coin = main.get("coin") or ""
-    side = (main.get("side_label") or main.get("side") or "").upper()
+    side = (main.get("dir_label") or main.get("side_label") or main.get("side") or "").upper()
     emoji = "🟢" if side == "LONG" else ("🔴" if side == "SHORT" else "")
     head = "🗑 *ORDER REMOVED*" + (f" — #{main['oid']}" if main.get("oid") else "")
     lines = [head, f"*{coin} · {side}* {emoji}".strip()]
@@ -335,15 +365,18 @@ def _wallet_snapshot(addr):
             except (TypeError, ValueError):
                 continue
             mark = 0.0
+            pos_side = ""
             for ap in state.get("assetPositions") or []:
                 p = ap.get("position") or {}
                 if p.get("coin") == o.get("coin"):
                     try:
                         mark = float(p.get("markPx") or 0)
+                        pos_side = "Long" if float(p.get("szi") or 0) > 0 else "Short"
                     except (TypeError, ValueError):
-                        mark = 0.0
+                        mark, pos_side = 0.0, ""
                     break
             kind, is_tp, is_sl = _order_kind(o, mark)
+            dir_label = _order_dir_label(o, kind, pos_side)
             key = (str(o.get("oid")) if o.get("oid") is not None
                    else f"{o.get('coin')}|{o.get('side')}|{price}|{sz}")
             orders[key] = {
@@ -351,12 +384,14 @@ def _wallet_snapshot(addr):
                 "coin": o.get("coin"),
                 "side": o.get("side"),
                 "side_label": _side_label(o.get("side")),
+                "dir_label": dir_label,
                 "px": price,
                 "sz": sz,
                 "notional": round(sz * price, 2),
                 "type": kind,
                 "is_tp": is_tp,
                 "is_sl": is_sl,
+                "reduce_only": bool(o.get("reduceOnly")),
                 "is_trigger": bool(o.get("isTrigger")),
             }
     except Exception:
@@ -635,6 +670,7 @@ def _subs_loop():
 def _watch_loop():
     """Фоновый цикл: раз в WATCH_INTERVAL секунд опрашивает кошельки подписчиков."""
     cache = {}  # addr -> snapshot
+    pending_rm = {}  # (addr, coin, dir) -> {main, others, due}: склейка снятых ордеров
     while True:
         try:
             conn = _db()
@@ -701,28 +737,41 @@ def _watch_loop():
                 for k, o in now_o.items():
                     if k in prev_o or any(o["coin"] in e for e in events):
                         continue
-                    side_s = o.get("side_label") or o["side"]
+                    side_s = o.get("dir_label") or o.get("side_label") or o["side"]
                     kind = o.get("type") or ("Trigger" if o["is_trigger"] else "Limit")
                     events.append(
                         f"🧾 *{kind} placed:* {o['coin']} {side_s} · "
                         f"{_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}"
                     )
 
-                # Снятие ордеров: группируем по монете и направлению, чтобы
-                # показать тейк/стоп, ушедшие вместе с ордером в этом же цикле
+                # Снятие ордеров: TP и SL часто уходят с разницей в один цикл,
+                # поэтому держим сообщение ORDER_GROUP_WINDOW секунд и склеиваем
+                # в один блок («Removed together»), а не шлём два раза по одному
                 removed = {}
                 for k, o in prev_o.items():
                     if k in now_o:
                         continue
-                    removed.setdefault((o.get("coin"), o.get("side_label") or o.get("side")), []).append(o)
-                for group in removed.values():
-                    exits = [x for x in group if x.get("is_tp") or x.get("is_sl")]
-                    mains = [x for x in group if not (x.get("is_tp") or x.get("is_sl"))]
-                    if mains:
-                        for m in mains:
-                            events.append(_order_removed_text(m, exits))
-                    else:
-                        events.append(_order_removed_text(group[0], group[1:]))
+                    removed.setdefault(
+                        (o.get("coin"), o.get("dir_label") or o.get("side_label")), []
+                    ).append(o)
+                for (coin, dirs), group in removed.items():
+                    for main_ord, others in _removal_pairs(group):
+                        pkey = (addr, coin, dirs)
+                        pend = pending_rm.get(pkey)
+                        if pend:
+                            for x in [main_ord] + list(others):
+                                if x is not pend["main"] and x not in pend["others"]:
+                                    pend["others"].append(x)
+                        else:
+                            pending_rm[pkey] = {"main": main_ord, "others": list(others),
+                                                "due": time.time() + ORDER_GROUP_WINDOW}
+
+                # Всё, что уже не ждёт «соседей», отправляем одним сообщением
+                now_ts = time.time()
+                for pkey in [k for k, p in list(pending_rm.items()) if p["due"] <= now_ts]:
+                    pend = pending_rm.pop(pkey)
+                    for cid in subs_map.get(pkey[0], ()):
+                        send_message(cid, _order_removed_text(pend["main"], pend["others"]))
 
                 for ev in events:
                     for cid in chat_ids:
