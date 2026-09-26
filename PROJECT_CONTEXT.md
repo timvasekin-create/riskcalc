@@ -222,8 +222,9 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   не поправили руками (`calcEntryAuto`). После Calculate посчитанные поля подставляются
   в инпуты и подсвечиваются янтарным (`auto-filled`) — видно, чего не хватало.
 - Short — красная подсветка (как Sell/Short на Hyperliquid): `.dir-btn.active-short`.
-- Хедер sticky (`sticky top-0 z-40 bg-hyper-bg/95 backdrop-blur`) — навигация не уезжает;
-  `section { scroll-margin-top:92px }`, чтобы якоря не прятались под хедер.
+- Липкая полоса при прокрутке: хедер И живой тикер — одна `sticky top-0 z-40`
+  полоса (тикер лежит в ней же, поэтому цены/проценты видны всегда);
+  `section { scroll-margin-top:140px }`, чтобы якоря не прятались под полосу.
 - График калькулятора обновляется каждые 5 сек, только при активной вкладке
   (visibilitychange). Сервер: CANDLE_TTL=5с, CANDLE_MAX=16 записей, вытеснение самой
   старой (было clear() всего кэша), SVG на клиенте не перерисовывается без изменений.

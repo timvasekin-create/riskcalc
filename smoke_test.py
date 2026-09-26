@@ -442,7 +442,11 @@ try:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Position Calculator" in hub, "на хабе должен быть калькулятор позиций"
     assert "calcChart" in hub, "на хабе нет графика калькулятора"
-    log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
+    # Тикер закреплён вместе с хедером: он в липкой полосе, то есть ВЫШЕ <main>
+    assert 'class="sticky top-0 z-40' in hub, "липкая полоса (хедер + тикер) пропала"
+    assert hub.index('id="tickerItems"') < hub.index('<main class="flex-grow">'), \
+        "тикер должен находиться в липкой полосе (выше main)"
+    log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб (тикер закреплён вместе с хедером)")
 
     req2 = urllib.request.Request(BASE + "/", headers={"Host": "calc.rustdeck.app"})
     with urllib.request.urlopen(req2, timeout=8) as r:

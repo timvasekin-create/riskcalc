@@ -89,13 +89,15 @@
         .toast b { color:#ffffff; }
         .toast span { color:#8b96a3; }
         @keyframes toastIn { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:none; } }
-        section { scroll-margin-top:92px; }
+        /* Липкая полоса = хедер + тикер (~90px): якоря не прячутся под ней */
+        section { scroll-margin-top:140px; }
     </style>
 </head>
 <body class="bg-hyper-bg text-hyper-text min-h-screen flex flex-col">
 
-    <!-- Хедер -->
-    <header class="sticky top-0 z-40 border-b border-hyper-border bg-hyper-bg/95 backdrop-blur py-3 px-4 md:px-8 flex justify-between items-center">
+    <!-- Хедер + живой тикер: одна липкая полоса — при прокрутке остаются оба -->
+    <div class="sticky top-0 z-40 bg-hyper-bg/95 backdrop-blur border-b border-hyper-border">
+    <header class="border-b border-hyper-border py-3 px-4 md:px-8 flex justify-between items-center">
         <div class="flex items-center space-x-2">
             <svg class="w-6 h-6 text-hyper-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -115,6 +117,11 @@
             <div id="profileArea" class="flex items-center"></div>
         </div>
     </header>
+        <!-- Живой тикер: внутри липкой полосы, поэтому тоже не уезжает -->
+        <div class="bg-hyper-panel/60 px-4 py-2 overflow-x-auto">
+            <div class="flex gap-6 min-w-max text-[12px] font-mono justify-center" id="tickerItems"></div>
+        </div>
+    </div>
 
     <!-- Боковые баннеры (видны на широких экранах) -->
     <aside class="side-rail left-rail space-y-4">
@@ -148,10 +155,6 @@
     </aside>
 
     <main class="flex-grow">
-        <!-- Живой тикер -->
-        <div class="border-b border-hyper-border bg-hyper-panel/60 px-4 py-2 overflow-x-auto">
-            <div class="flex gap-6 min-w-max text-[12px] font-mono justify-center" id="tickerItems"></div>
-        </div>
         <!-- Hero -->
         <section class="max-w-5xl mx-auto px-4 pt-12 pb-8 text-center">
             <div class="text-[11px] text-hyper-teal font-mono tracking-[0.25em] uppercase mb-4">Free · No sign-up · Live data</div>
