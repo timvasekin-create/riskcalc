@@ -900,11 +900,18 @@ def _cmd_prices(chat_id):
 
 
 def _hl_prices(syms=None):
-    """Цены перпов Hyperliquid (allMids): {SYM: float} или только нужные символы."""
-    try:
-        mids = _hl_post({"type": "allMids"}) or {}
-    except Exception:
-        return {}
+    """Цены перпов Hyperliquid (allMids): {SYM: float} или только нужные символы.
+    Одна повторная попытка: одиночный сетевой сбой не должен превращать
+    «/alert BTC > 90000» в «Unknown asset»."""
+    mids = {}
+    for attempt in range(2):
+        try:
+            mids = _hl_post({"type": "allMids"}) or {}
+            break
+        except Exception:
+            mids = {}
+            if attempt == 0:
+                time.sleep(0.4)
     out = {}
     for k, v in mids.items():
         try:

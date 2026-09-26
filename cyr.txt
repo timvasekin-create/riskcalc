@@ -1,0 +1,7 @@
+﻿VISIBLE_CYRILLIC_LINES 6
+('app/index.html', 1169, 'const CALC_FEE = 0.00045; // ЄхщъхЁ-ъюьшёёш  HL, юЄъЁ√Єшх+чръЁ√Єшх ёўшЄрхь юЄфхы№эю')
+('app/index.html', 1174, 'let calcEntryAuto = true; // entry чряюыэхэ Ўхэющ ЄшъхЁр, р эх Ёєърьш')
+('app/index.html', 1901, 'showToast(ev.title, ev.text, bad); // тёяы√тр°ър эр ёЄЁрэшЎх Ч тшфэр тёхуфр')
+('app/index.html', 1985, 'poll(); // яхЁт√щ юяЁюё Ч срчр фы  ёЁртэхэш , єтхфюьыхэшщ эх сєфхЄ')
+('templates/index.html', 659, 'entryTouchedByUser = false; // т√сЁры ръЄшт чрэютю Ч ёэютр фютхЁ хь цштющ Ўхэх')
+('templates/index.html', 891, 'entryTouchedByUser = true; // ёюїЁрэ╕ээр  Ўхэр ■чхЁр Ч цштр  эх яхЁхчряшё√трхЄ х╕')
