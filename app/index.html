@@ -7,7 +7,7 @@
     <meta name="description" content="Free Hyperliquid wallet tracker: paste any address and see account value, PnL, win rate, open positions and recent trades. Plus live market prices and funding rates. No sign-up.">
     <meta name="keywords" content="hyperliquid wallet tracker, hyperliquid wallet stats, crypto wallet pnl, win rate tracker, funding rates, live crypto prices, rustdeck">
     <link rel="canonical" href="https://rustdeck.app/">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='80' fill='%2350d2c1'>⚡</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230a0e13'/><text x='30' y='45' font-family='Arial' font-size='36' font-weight='bold' fill='%2350d2c1' text-anchor='middle'>R</text><path d='M50 6 L38 26 h7 l-6 16 16-22 h-8z' fill='%23f0b90b'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,6 +52,19 @@
         .alert-feed-item { background:#0a0e13; border:1px solid #1e252e; border-radius:6px; padding:6px 10px; }
         .whale-row { display:flex; align-items:center; gap:10px; background:#0a0e13; border:1px solid #1e252e; border-radius:8px; padding:8px 12px; font-size:12px; cursor:pointer; transition:border-color 0.15s; flex-wrap:wrap; }
         .whale-row:hover { border-color:#50d2c1; }
+        .chart-tab { font-size:11px; font-weight:600; color:#5c6670; background:none; border:none; border-bottom:2px solid transparent; padding:4px 2px; cursor:pointer; transition:color 0.15s, border-color 0.15s; }
+        .chart-tab:hover { color:#eaecef; }
+        .chart-tab.active { color:#ffffff; border-bottom-color:#50d2c1; }
+        .side-rail { display:none; }
+        @media (min-width:1500px) { .side-rail { display:block; position:fixed; top:110px; width:190px; z-index:30; } }
+        .side-rail.left-rail { left:calc(50% - 726px); }
+        .side-rail.right-rail { right:calc(50% - 726px); }
+        .dir-btn, .lev-preset, .unit-btn { background:#0a0e13; border:1px solid #1e252e; color:#8b96a3; font-size:11px; font-weight:700; padding:6px 4px; border-radius:6px; cursor:pointer; transition:all 0.15s; }
+        .dir-btn:hover, .lev-preset:hover, .unit-btn:hover { color:#eaecef; }
+        .dir-btn.active, .lev-preset.active, .unit-btn.active { background:rgba(80,210,193,0.12); border-color:#50d2c1; color:#50d2c1; }
+        .lev-slider { -webkit-appearance:none; appearance:none; height:6px; background:#1e252e; border-radius:3px; outline:none; }
+        .lev-slider::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%; background:#50d2c1; cursor:pointer; }
+        .lev-slider::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#50d2c1; cursor:pointer; border:none; }
         #toastStack { position:fixed; top:16px; right:16px; z-index:100; display:flex; flex-direction:column; gap:8px; max-width:340px; }
         .toast { background:#151a20; border:1px solid #2a323d; border-left:3px solid #50d2c1; border-radius:10px; padding:10px 14px; box-shadow:0 8px 30px rgba(0,0,0,0.6); animation:toastIn 0.25s ease-out; font-size:12px; }
         .toast.bad { border-left-color:#f6465d; }
@@ -83,6 +96,37 @@
             <div id="profileArea" class="flex items-center"></div>
         </div>
     </header>
+
+    <!-- Боковые баннеры (видны на широких экранах) -->
+    <aside class="side-rail left-rail space-y-4">
+        <a href="https://app.hyperliquid.xyz/join/BENGALCAT4" target="_blank" rel="noopener" class="block bg-hyper-panel border border-hyper-teal/30 rounded-xl p-4 hover:border-hyper-teal transition-colors">
+            <div class="text-2xl mb-2">🟢</div>
+            <div class="text-[12px] font-bold text-white mb-1">Trade on Hyperliquid</div>
+            <div class="text-[10px] text-hyper-muted2 leading-relaxed">Get 5% off fees with our link — and support RustDeck.</div>
+            <div class="text-[10px] text-hyper-teal font-semibold mt-2">Join →</div>
+        </a>
+        <div class="bg-hyper-panel border border-hyper-border rounded-xl p-4">
+            <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-2">How it works</div>
+            <ul class="text-[10px] text-hyper-muted2 space-y-2 leading-relaxed">
+                <li>📋 Paste any HL wallet — see PnL, win rate, positions</li>
+                <li>🏅 RustDeck Score rates the wallet from S to D</li>
+                <li>✈️ Follow it in Telegram for 24/7 alerts</li>
+            </ul>
+        </div>
+    </aside>
+    <aside class="side-rail right-rail space-y-4">
+        <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="block bg-hyper-panel border border-hyper-border rounded-xl p-4 hover:border-hyper-teal transition-colors">
+            <div class="text-2xl mb-2">✈️</div>
+            <div class="text-[12px] font-bold text-white mb-1">Telegram bot</div>
+            <div class="text-[10px] text-hyper-muted2 leading-relaxed">Wallet alerts, price alerts, top traders. 7 days free.</div>
+            <div class="text-[10px] text-hyper-teal font-semibold mt-2">Open bot →</div>
+        </a>
+        <div class="bg-hyper-panel border border-hyper-border rounded-xl p-4">
+            <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-2">Share your score</div>
+            <div class="text-[10px] text-hyper-muted2 leading-relaxed mb-2">Every wallet gets a shareable RustDeck Score page:</div>
+            <div class="text-[10px] font-mono text-hyper-teal break-all">rustdeck.app/score/0x…</div>
+        </div>
+    </aside>
 
     <main class="flex-grow">
         <!-- Живой тикер -->
@@ -136,6 +180,7 @@
                         <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evClose" class="accent-[#50d2c1]"> Position closed</label>
                         <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evLiq" class="accent-[#50d2c1]"> Liquidation</label>
                         <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evFill" class="accent-[#50d2c1]"> Any new fill</label>
+                        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evOrders" class="accent-[#50d2c1]"> Limit orders (placed / removed)</label>
                         <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="evSound" class="accent-[#50d2c1]"> Sound</label>
                         <button type="button" id="alertsTest" class="text-left text-hyper-teal hover:text-white transition-colors">▶ Test alert</button>
                     </div>
@@ -187,10 +232,14 @@
                         </div>
                     </div>
 
-                    <!-- График PnL -->
-                    <div id="chartBlock" class="mb-5 bg-hyper-bg border border-hyper-border rounded-lg p-4">
+                    <!-- График: Account Value / PnL / Perps PnL (в стиле HL, но плавными кривыми) -->
+                    <div id="chartBlock" class="relative mb-5 bg-hyper-bg border border-hyper-border rounded-lg p-4">
                         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-                            <div class="text-[10px] text-hyper-muted uppercase tracking-[0.15em] font-semibold">PnL Chart</div>
+                            <div class="flex gap-3 items-center" id="chartTabs">
+                                <button type="button" data-m="value" class="chart-tab">Account Value</button>
+                                <button type="button" data-m="pnl" class="chart-tab active">PNL</button>
+                                <button type="button" data-m="perp" class="chart-tab">Perps PNL</button>
+                            </div>
                             <div class="flex gap-0.5" id="chartToggles">
                                 <button type="button" data-c="24h" class="pnlp-btn">24H</button>
                                 <button type="button" data-c="7d" class="pnlp-btn">7D</button>
@@ -198,7 +247,8 @@
                                 <button type="button" data-c="all" class="pnlp-btn">All</button>
                             </div>
                         </div>
-                        <div id="pnlChart"></div>
+                        <div id="pnlChart" class="relative"></div>
+                        <div id="chartTip" class="hidden absolute pointer-events-none bg-hyper-elev border border-hyper-borderLight rounded-md px-2.5 py-1.5 text-[10px] font-mono text-hyper-text shadow-xl z-10 leading-relaxed"></div>
                     </div>
 
                     <div id="positionsBlock" class="mb-5">
@@ -255,6 +305,100 @@
                             <a id="followTgBtn" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Get alerts for this wallet in Telegram 24/7">✈️ Watch in TG</a>
                             <button type="button" id="refreshWalletBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-mono" title="Refresh wallet data">⟳ Refresh</button>
                         </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== POSITION CALCULATOR (live Hyperliquid data + chart) ===== -->
+        <section id="calc" class="max-w-5xl mx-auto px-4 pb-12">
+            <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 md:p-6">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+                    <h3 class="text-lg font-bold text-white">Position Calculator <span class="text-hyper-muted2 text-[12px] font-normal">live Hyperliquid prices</span></h3>
+                    <div class="flex items-center gap-2">
+                        <input id="calcTicker" class="hl-input !w-28 !py-1.5 text-center uppercase font-bold" placeholder="BTC" maxlength="12" spellcheck="false">
+                        <span id="calcLivePrice" class="text-[12px] font-mono text-hyper-teal">—</span>
+                    </div>
+                </div>
+                <div class="grid lg:grid-cols-2 gap-6">
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Capital (own margin) $</label>
+                                <input id="calcCapital" type="number" class="hl-input mt-1" placeholder="1000" step="any">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Direction</label>
+                                <div class="grid grid-cols-2 gap-1 mt-1" id="calcDir">
+                                    <button type="button" data-d="long" class="dir-btn active">Long</button>
+                                    <button type="button" data-d="short" class="dir-btn">Short</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Leverage (max 40x — always required)</label>
+                                <span id="calcLevVal" class="text-[12px] font-mono text-hyper-teal font-bold">10x</span>
+                            </div>
+                            <input id="calcLev" type="range" min="1" max="40" step="1" value="10" class="lev-slider w-full">
+                            <div class="flex gap-1 mt-1.5" id="calcLevPresets">
+                                <button type="button" data-l="1" class="lev-preset">1x</button>
+                                <button type="button" data-l="3" class="lev-preset">3x</button>
+                                <button type="button" data-l="5" class="lev-preset">5x</button>
+                                <button type="button" data-l="10" class="lev-preset active">10x</button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Entry</label>
+                                <input id="calcEntry" type="number" class="hl-input mt-1" placeholder="live" step="any">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Stop</label>
+                                <input id="calcStop" type="number" class="hl-input mt-1" step="any">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Take</label>
+                                <input id="calcTake" type="number" class="hl-input mt-1" step="any">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Risk per trade</label>
+                                <div class="flex gap-1 mt-1">
+                                    <input id="calcRisk" type="number" class="hl-input" placeholder="100" step="any">
+                                    <div class="flex flex-col gap-0.5" id="calcRiskUnit">
+                                        <button type="button" data-u="$" class="unit-btn active">$</button>
+                                        <button type="button" data-u="%" class="unit-btn">%</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Risk : Reward</label>
+                                <input id="calcRR" class="hl-input mt-1 font-mono" placeholder="1:2" value="1:2" spellcheck="false">
+                                <div class="flex gap-1 mt-1.5" id="calcRRPresets">
+                                    <button type="button" data-rr="1:2" class="lev-preset active">1:2</button>
+                                    <button type="button" data-rr="1:3" class="lev-preset">1:3</button>
+                                    <button type="button" data-rr="1:4" class="lev-preset">1:4</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                        <button id="calcBtn" class="w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 rounded-lg transition-all text-[13px] uppercase tracking-wider">Calculate Position</button>
+                        <div id="calcNote" class="text-[10px] text-hyper-muted leading-relaxed">Leverage is always required. Fill the fields you know — the rest is solved automatically (entry defaults to the live price).</div>
+                    </div>
+                    <div>
+                        <div class="grid grid-cols-2 gap-2 mb-4">
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Position Size</div><div id="crSize" class="text-lg font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Quantity</div><div id="crQty" class="text-lg font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Margin Used</div><div id="crMargin" class="text-lg font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Risk</div><div id="crRisk" class="text-lg font-bold font-mono text-hyper-yellow">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Liquidation</div><div id="crLiq" class="text-lg font-bold font-mono text-hyper-red">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">R : R</div><div id="crRR" class="text-lg font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Profit at TP</div><div id="crTP" class="text-lg font-bold font-mono text-hyper-teal">—</div></div>
+                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Loss at SL</div><div id="crSL" class="text-lg font-bold font-mono text-hyper-red">—</div></div>
+                        </div>
+                        <div id="calcChart" class="relative border border-hyper-border rounded-lg bg-hyper-bg p-2"></div>
                     </div>
                 </div>
             </div>
@@ -375,7 +519,15 @@
         const $ = (id) => document.getElementById(id);
         const LOCALE = 'en-US';
         const fmtUsd = (n, d=2) => n.toLocaleString(LOCALE, {minimumFractionDigits:d, maximumFractionDigits:d});
-        const fmtPrice = (p) => p >= 1000 ? p.toLocaleString(LOCALE, {minimumFractionDigits:2, maximumFractionDigits:2}) : p >= 1 ? p.toFixed(3) : p.toFixed(4);
+        const fmtPrice = (p) => {
+            const a = Math.abs(p);
+            if (a >= 1000) return p.toLocaleString(LOCALE, {minimumFractionDigits:2, maximumFractionDigits:2});
+            if (a >= 1) return p.toFixed(3);
+            if (a >= 0.01) return p.toFixed(4);
+            if (a === 0) return '0';
+            // мелкие цены: без потери значащих цифр (0.004362, а не 0.0044)
+            return String(parseFloat(p.toFixed(Math.min(10, 4 - Math.floor(Math.log10(a))))));
+        };
         const fmtCompact = (n) => n >= 1e9 ? '$' + (n/1e9).toFixed(2) + 'B' : n >= 1e6 ? '$' + (n/1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(1) + 'K' : '$' + n.toFixed(0);
         const pnlCls = (v) => v >= 0 ? 'text-hyper-teal' : 'text-hyper-red';
         const pnlSign = (v) => (v >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(v));
@@ -451,7 +603,14 @@
                 renderWallet(j);
                 currentWalletAddr = addr;
                 $('followTgBtn').href = 'https://t.me/RustDeckcryptobot?start=watch_' + addr;
-                if (profile) { profile.lastWallet = addr; saveProfile(profile); }
+                if (profile) {
+                    // Кошелёк сразу сохраняется в аккаунт и становится дефолтным
+                    profile.lastWallet = addr;
+                    profile.wallets = profile.wallets || [];
+                    if (!profile.wallets.includes(addr)) profile.wallets.push(addr);
+                    if (!profile.wallet) profile.wallet = addr;
+                    saveProfile(profile);
+                }
                 renderChips();
                 if (getAlerts().enabled) startWatching();
             } catch(e) {
@@ -586,12 +745,31 @@
                 b.classList.toggle('active', b.dataset.period === period));
         }
 
-        // ===== PnL-график (SVG, данные из API portfolio) =====
+        // ===== График (SVG): вкладки Account Value / PnL / Perps PnL + курсор с значениями =====
+        let chartMetric = 'pnl';
+        let chartHover = null;
+
+        function chartSeries(d, metric, period) {
+            let h;
+            if (metric === 'value') h = ((d.value_charts || {})[period]) || [];
+            else if (metric === 'perp') h = (d.perp_chart || []).slice();
+            else h = ((d.pnl_charts || {})[period]) || [];
+            if (period !== 'all' && h.length) {
+                const hours = period === '24h' ? 24 : period === '7d' ? 168 : 720;
+                const since = Date.now() - hours * 3600e3;
+                const f = h.filter(p => p[0] >= since);
+                if (f.length >= 2) h = f;
+            }
+            return h;
+        }
+
+        const chartVal = (v) => chartMetric === 'value' ? '$' + fmtUsd(v) : pnlSign(v);
+
         function renderPnlChart(period) {
             chartPeriod = period;
             const d = window.__walletData;
             if (!d) return;
-            const h = (d.pnl_charts || {})[period] || [];
+            const h = chartSeries(d, chartMetric, period);
             const wrap = $('chartBlock');
             if (wrap) wrap.classList.toggle('hidden', h.length < 2);
             if (h.length < 2) return;
@@ -603,10 +781,12 @@
                 P + i * (W - 2 * P) / (vals.length - 1),
                 H - P - (v - min) * (H - 2 * P) / range
             ]);
+            chartHover = { h, pts };
             const line = pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
             const zeroY = H - P - (0 - min) * (H - 2 * P) / range;
-            const color = vals[vals.length - 1] >= 0 ? '#50d2c1' : '#f6465d';
-            const last = pnlSign(vals[vals.length - 1]);
+            const lastVal = vals[vals.length - 1];
+            const positive = chartMetric === 'value' ? lastVal >= vals[0] : lastVal >= 0;
+            const color = positive ? '#50d2c1' : '#f6465d';
             $('pnlChart').innerHTML = `
                 <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:130px;display:block;">
                     <line x1="0" y1="${zeroY.toFixed(1)}" x2="${W}" y2="${zeroY.toFixed(1)}" stroke="#1e252e" stroke-width="1" stroke-dasharray="4,4"/>
@@ -614,17 +794,51 @@
                     <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
                     <circle cx="${pts[pts.length - 1][0].toFixed(1)}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="3.5" fill="${color}"/>
                 </svg>
+                <svg id="pnlHover" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:130px;"></svg>
                 <div class="flex justify-between text-[10px] font-mono text-hyper-muted mt-1">
                     <span>${new Date(h[0][0]).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span>
-                    <span class="${pnlCls(vals[vals.length - 1])} font-bold">${last}</span>
+                    <span class="${chartMetric === 'value' ? '' : pnlCls(lastVal)} font-bold">${chartVal(lastVal)}</span>
                     <span>now</span>
                 </div>`;
+            document.querySelectorAll('#chartTabs .chart-tab').forEach(b =>
+                b.classList.toggle('active', b.dataset.m === chartMetric));
             document.querySelectorAll('#chartToggles .pnlp-btn').forEach(b =>
                 b.classList.toggle('active', b.dataset.c === period));
         }
 
+        // Курсор по графику: вертикальная линия + всплывающее значение
+        (function bindChartHover() {
+            const box = $('pnlChart');
+            box.addEventListener('mousemove', e => {
+                if (!chartHover || !chartHover.h.length) return;
+                const { h, pts } = chartHover;
+                const hover = $('pnlHover');
+                if (!hover) return;
+                const rect = box.getBoundingClientRect();
+                const xRatio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+                const idx = Math.min(h.length - 1, Math.round(xRatio * (h.length - 1)));
+                const p = pts[idx];
+                hover.innerHTML = `<line x1="${p[0].toFixed(1)}" y1="0" x2="${p[0].toFixed(1)}" y2="130" stroke="#5c6670" stroke-width="1" stroke-dasharray="3,3"/><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#ffffff"/>`;
+                const tip = $('chartTip');
+                const cRect = $('chartBlock').getBoundingClientRect();
+                const dt = new Date(h[idx][0]).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false});
+                tip.innerHTML = `${dt}<br><b class="${chartMetric === 'value' ? 'text-white' : pnlCls(h[idx][1])}">${chartVal(h[idx][1])}</b>`;
+                tip.classList.remove('hidden');
+                tip.style.left = Math.max(8, Math.min(cRect.width - 150, e.clientX - cRect.left - 60)) + 'px';
+                tip.style.top = Math.max(8, e.clientY - cRect.top - 48) + 'px';
+            });
+            box.addEventListener('mouseleave', () => {
+                const hover = $('pnlHover');
+                if (hover) hover.innerHTML = '';
+                $('chartTip').classList.add('hidden');
+            });
+        })();
+
         document.querySelectorAll('#chartToggles .pnlp-btn').forEach(b =>
             b.addEventListener('click', () => renderPnlChart(b.dataset.c)));
+
+        document.querySelectorAll('#chartTabs .chart-tab').forEach(b =>
+            b.addEventListener('click', () => { chartMetric = b.dataset.m; renderPnlChart(chartPeriod); }));
 
         document.querySelectorAll('#pnlToggles .pnlp-btn').forEach(b =>
             b.addEventListener('click', () => setPnlPeriod(b.dataset.period)));
@@ -771,8 +985,273 @@
         loadWhales(); setInterval(loadWhales, 60000);
         loadLeaderboard(); setInterval(loadLeaderboard, 120000);
     </script>
+    <script>
+        // ===== POSITION CALCULATOR: живые данные HL + решатель + график =====
+        const CALC_FEE = 0.00045; // тейкер-комиссия HL, открытие+закрытие считаем отдельно
+        let calcDirValue = 'long';
+        let calcLevValue = 10;
+        let calcRiskUnit = '$';
+        let calcTicker = '';
+        let calcCandles = [];
+        let calcLines = {};
+        let calcChartGeo = null;
+
+        const num = (id) => { const v = parseFloat($(id).value); return isFinite(v) ? v : null; };
+        const setNum = (id, v) => { $(id).value = v; };
+
+        function parseRR(s) {
+            const m = /^\s*(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)\s*$/.exec(s || '');
+            if (!m) return null;
+            const a = parseFloat(m[1]), b = parseFloat(m[2]);
+            return (a > 0 && b > 0) ? b / a : null; // 1:2 → 2
+        }
+
+        document.querySelectorAll('#calcDir .dir-btn').forEach(b => b.addEventListener('click', () => {
+            calcDirValue = b.dataset.d;
+            document.querySelectorAll('#calcDir .dir-btn').forEach(x => x.classList.toggle('active', x === b));
+        }));
+        function setLev(v) {
+            calcLevValue = Math.max(1, Math.min(40, Math.round(v)));
+            $('calcLev').value = calcLevValue;
+            $('calcLevVal').textContent = calcLevValue + 'x';
+            document.querySelectorAll('#calcLevPresets .lev-preset').forEach(x =>
+                x.classList.toggle('active', parseFloat(x.dataset.l) === calcLevValue));
+        }
+        $('calcLev').addEventListener('input', () => setLev(parseFloat($('calcLev').value)));
+        document.querySelectorAll('#calcLevPresets .lev-preset').forEach(b =>
+            b.addEventListener('click', () => setLev(parseFloat(b.dataset.l))));
+        document.querySelectorAll('#calcRiskUnit .unit-btn').forEach(b => b.addEventListener('click', () => {
+            calcRiskUnit = b.dataset.u;
+            document.querySelectorAll('#calcRiskUnit .unit-btn').forEach(x => x.classList.toggle('active', x === b));
+        }));
+        document.querySelectorAll('#calcRRPresets .lev-preset').forEach(b => b.addEventListener('click', () => {
+            $('calcRR').value = b.dataset.rr;
+            document.querySelectorAll('#calcRRPresets .lev-preset').forEach(x => x.classList.toggle('active', x === b));
+        }));
+
+        // Тикер: регистр не важен («btc», «Btc», «HYPE») — данные с HL
+        async function loadCalcTicker(sym) {
+            sym = (sym || '').trim().toUpperCase();
+            if (!sym) return;
+            try {
+                const r = await fetch('/api/candles/' + encodeURIComponent(sym) + '?hours=72');
+                if (!r.ok) { $('calcLivePrice').textContent = 'unknown ticker'; return; }
+                const j = await r.json();
+                calcTicker = j.coin;
+                calcCandles = j.candles || [];
+                const last = calcCandles[calcCandles.length - 1];
+                if (last) {
+                    $('calcLivePrice').textContent = '$' + fmtPrice(last.c) + ' · live';
+                    if (!$('calcEntry').value) setNum('calcEntry', last.c);
+                }
+                drawCalcChart();
+            } catch(e) { $('calcLivePrice').textContent = '—'; }
+        }
+        let calcTickerTimer = null;
+        $('calcTicker').addEventListener('input', function() {
+            clearTimeout(calcTickerTimer);
+            const v = this.value.trim().toUpperCase();
+            calcTickerTimer = setTimeout(() => { if (v) loadCalcTicker(v); }, 600);
+        });
+        $('calcTicker').addEventListener('keydown', e => { if (e.key === 'Enter') loadCalcTicker($('calcTicker').value); });
+        setInterval(() => { if (calcTicker && !document.hidden) loadCalcTicker(calcTicker); }, 60000);
+    </script>
+    <script>
+        // ===== Решатель: считает то, чего не хватает (плечо всегда обязательно) =====
+        function calcPosition() {
+            const E_in = num('calcEntry') || (calcCandles.length ? calcCandles[calcCandles.length - 1].c : null);
+            if (!E_in) { $('calcNote').textContent = 'Enter a ticker to load the live price, or type an entry price.'; return; }
+            const E = E_in;
+            const S_in = num('calcStop');
+            const T_in = num('calcTake');
+            const C_in = num('calcCapital');
+            const R_in = num('calcRisk');
+            const L = calcLevValue;
+            const rrIn = parseRR($('calcRR').value) || 2;
+            const long = calcDirValue === 'long';
+            const notes = [];
+
+            let riskAmount = null;
+            if (R_in !== null) {
+                if (calcRiskUnit === '%') {
+                    if (C_in === null) { $('calcNote').textContent = 'For % risk I need the capital too.'; return; }
+                    riskAmount = C_in * R_in / 100;
+                } else {
+                    riskAmount = R_in;
+                }
+            }
+
+            let S = S_in, T = T_in, C = C_in, rr = rrIn;
+            let notional = null, qty = null, margin = null;
+
+            if (S !== null && riskAmount) {
+                // Стоп + риск → размер позиции из риска (остальное — производные)
+                const stopDist = Math.abs(E - S);
+                if (stopDist <= 0) { $('calcNote').textContent = 'Stop must be different from entry.'; return; }
+                qty = riskAmount / stopDist;
+                notional = qty * E;
+                margin = notional / L;
+                if (C !== null && margin > C * 1.000001) {
+                    margin = C; notional = margin * L; qty = notional / E;
+                    notes.push('Capped by capital — real risk $' + fmtUsd(qty * stopDist));
+                } else if (C === null) {
+                    C = margin;
+                    notes.push('Capital derived: $' + fmtUsd(C));
+                }
+            } else if (C !== null && riskAmount && S === null) {
+                // Капитал + риск → стоп считается (полная маржа)
+                notional = C * L; qty = notional / E; margin = C;
+                const stopDist = riskAmount / qty;
+                S = long ? E - stopDist : E + stopDist;
+                notes.push('Stop derived from risk.');
+            } else if (C !== null && S !== null) {
+                // Капитал + стоп → риск
+                notional = C * L; qty = notional / E; margin = C;
+                riskAmount = qty * Math.abs(E - S);
+                notes.push('Risk at this stop: $' + fmtUsd(riskAmount));
+            } else {
+                $('calcNote').textContent = 'Not enough data — give me capital, stop or risk. Leverage is always required.';
+                return;
+            }
+
+            if (S !== null && T === null && rr) {
+                const stopDist = Math.abs(E - S);
+                T = long ? E + stopDist * rr : E - stopDist * rr;
+                notes.push('Take derived from R:R.');
+            } else if (S !== null && T !== null) {
+                const stopDist = Math.abs(E - S);
+                if (stopDist > 0) { rr = Math.abs(T - E) / stopDist; notes.push('R:R = 1:' + rr.toFixed(2)); }
+            }
+
+            const liq = long ? E * (1 - 1 / L) : E * (1 + 1 / L);
+            const fees = notional * CALC_FEE * 2;
+            const pnlTP = T !== null ? (long ? (T - E) : (E - T)) * qty - fees : null;
+            const pnlSL = S !== null ? (long ? (S - E) : (E - S)) * qty - fees : null;
+            const riskPct = C ? riskAmount / C * 100 : null;
+            calcLines = { entry: E, stop: S, take: T, liq: liq };
+
+            $('crSize').textContent = '$' + fmtUsd(notional);
+            $('crQty').textContent = fmtPrice(qty);
+            $('crMargin').textContent = '$' + fmtUsd(margin);
+            $('crRisk').textContent = '$' + fmtUsd(riskAmount || 0) + (riskPct !== null ? ' · ' + riskPct.toFixed(1) + '%' : '');
+            $('crLiq').textContent = '$' + fmtPrice(liq);
+            $('crRR').textContent = rr ? '1:' + rr.toFixed(2) : '—';
+            $('crTP').textContent = pnlTP !== null ? (pnlTP >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(pnlTP)) : '—';
+            $('crSL').textContent = pnlSL !== null ? (pnlSL >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(pnlSL)) : '—';
+            $('calcNote').textContent = (notes.length ? notes.join(' · ') + ' · ' : '') + 'Fees included (0.045% × 2).';
+            drawCalcChart();
+        }
+        $('calcBtn').addEventListener('click', calcPosition);
+        ['calcCapital','calcEntry','calcStop','calcTake','calcRisk'].forEach(id =>
+            $(id).addEventListener('keydown', e => { if (e.key === 'Enter') calcPosition(); }));
+    </script>
+    <script>
+        // ===== Свечной график: линии Entry / SL / TP / LIQ + текущая цена (как на HL) =====
+        function drawCalcChart() {
+            const box = $('calcChart');
+            if (!calcCandles.length) {
+                calcChartGeo = null;
+                box.innerHTML = '<div class="text-center text-hyper-muted text-[12px] py-16">Type a ticker above (BTC, eth, hype…) — the live chart loads here</div>';
+                return;
+            }
+            const cs = calcCandles.slice(-60);
+            const W = 600, H = 250, PR = 64, PT = 8, PB = 8;
+            const lineVals = [calcLines.entry, calcLines.stop, calcLines.take].filter(v => v && isFinite(v) && v > 0);
+            const prices = cs.map(c => c.l).concat(cs.map(c => c.h)).concat(lineVals);
+            let min = Math.min(...prices), max = Math.max(...prices);
+            const pad = (max - min) * 0.06 || max * 0.01;
+            min -= pad; max += pad;
+            const y = (p) => PT + (max - p) / (max - min) * (H - PT - PB);
+            const bw = (W - PR) / cs.length;
+            let bars = '';
+            cs.forEach((c, i) => {
+                const x = i * bw + bw / 2;
+                const up = c.c >= c.o;
+                const col = up ? '#50d2c1' : '#f6465d';
+                bars += `<line x1="${x.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="${col}" stroke-width="1"/>`;
+                const top = Math.min(y(c.o), y(c.c));
+                bars += `<rect x="${(x - bw * 0.3).toFixed(1)}" y="${top.toFixed(1)}" width="${Math.max(1, bw * 0.6).toFixed(1)}" height="${Math.max(1, Math.abs(y(c.c) - y(c.o))).toFixed(1)}" fill="${col}"/>`;
+            });
+            const lineEl = (p, color, label) => {
+                if (!p || !isFinite(p) || p < min || p > max) return '';
+                const yy = y(p);
+                return `<line x1="0" y1="${yy.toFixed(1)}" x2="${W - PR}" y2="${yy.toFixed(1)}" stroke="${color}" stroke-width="1.2" stroke-dasharray="5,3"/>
+                        <rect x="${W - PR + 2}" y="${(yy - 8).toFixed(1)}" width="${PR - 6}" height="16" rx="3" fill="${color}"/>
+                        <text x="${W - PR / 2}" y="${(yy + 3.5).toFixed(1)}" font-size="9" font-family="monospace" font-weight="bold" fill="#0a0e13" text-anchor="middle">${label}</text>`;
+            };
+            const cur = cs[cs.length - 1].c;
+            const curY = y(cur);
+            const curEl = `<line x1="0" y1="${curY.toFixed(1)}" x2="${W - PR}" y2="${curY.toFixed(1)}" stroke="#8b96a3" stroke-width="1" stroke-dasharray="2,3"/>
+                <rect x="${W - PR + 2}" y="${(curY - 8).toFixed(1)}" width="${PR - 6}" height="16" rx="3" fill="#8b96a3"/>
+                <text x="${W - PR / 2}" y="${(curY + 3.5).toFixed(1)}" font-size="9" font-family="monospace" font-weight="bold" fill="#0a0e13" text-anchor="middle">${fmtPrice(cur)}</text>`;
+            box.innerHTML = `
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:250px;display:block;">
+                    ${bars}
+                    ${lineEl(calcLines.liq, '#f6465d', 'LIQ')}
+                    ${lineEl(calcLines.stop, '#f6465d', 'SL')}
+                    ${lineEl(calcLines.entry, '#eaecef', 'EN')}
+                    ${lineEl(calcLines.take, '#50d2c1', 'TP')}
+                    ${curEl}
+                </svg>
+                <div id="calcTip" class="hidden absolute pointer-events-none bg-hyper-elev border border-hyper-borderLight rounded-md px-2 py-1 text-[10px] font-mono text-hyper-text shadow-xl z-10 leading-relaxed"></div>
+                <div class="flex justify-between text-[10px] font-mono text-hyper-muted mt-1 px-1">
+                    <span>${new Date(cs[0].t).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span>
+                    <span>${calcTicker} · 1h</span>
+                    <span>now</span>
+                </div>`;
+            calcChartGeo = { cs };
+        }
+
+        // Курсор по свечному графику: OHLC-подсказка
+        $('calcChart').addEventListener('mousemove', e => {
+            const g = calcChartGeo;
+            const tip = $('calcTip');
+            if (!g || !tip) return;
+            const rect = $('calcChart').getBoundingClientRect();
+            const xRatio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+            const i = Math.min(g.cs.length - 1, Math.floor(xRatio * g.cs.length));
+            const c = g.cs[i];
+            if (!c) return;
+            const dt = new Date(c.t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false});
+            tip.innerHTML = `${dt}<br>O ${fmtPrice(c.o)} · H ${fmtPrice(c.h)}<br>L ${fmtPrice(c.l)} · <b class="${c.c >= c.o ? 'text-hyper-teal' : 'text-hyper-red'}">C ${fmtPrice(c.c)}</b>`;
+            tip.classList.remove('hidden');
+            tip.style.left = Math.max(8, Math.min(rect.width - 150, e.clientX - rect.left - 70)) + 'px';
+            tip.style.top = Math.max(8, e.clientY - rect.top - 52) + 'px';
+        });
+        $('calcChart').addEventListener('mouseleave', () => { const t = $('calcTip'); if (t) t.classList.add('hidden'); });
+
+        // Старт: BTC по умолчанию
+        loadCalcTicker('BTC');
+    </script>
+
     <!-- Тосты уведомлений -->
     <div id="toastStack"></div>
+
+    <!-- Auth-модалка: Continue with RustDeck (вход через Telegram) -->
+    <div id="authModal" class="hidden fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-hyper-panel border border-hyper-border rounded-2xl p-6 shadow-2xl">
+            <div class="text-center mb-5">
+                <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-hyper-teal/15 border border-hyper-teal/40 flex items-center justify-center text-2xl">🔐</div>
+                <div class="text-white font-bold text-lg">Sign in to RustDeck</div>
+                <div class="text-[11px] text-hyper-muted2 mt-0.5" id="authSub">Choose an account</div>
+            </div>
+            <div id="authAccounts" class="mb-3"></div>
+            <button id="authTgBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-hyper-teal text-hyper-bg hover:bg-hyper-tealDim transition-colors mb-2">✈️ Continue with Telegram</button>
+            <div id="authTgBox" class="hidden mb-2">
+                <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 text-center">
+                    <div class="text-[10px] text-hyper-muted mb-1">Send <span class="font-mono text-hyper-teal">/link CODE</span> to <span class="text-hyper-teal">@RustDeckcryptobot</span></div>
+                    <div class="flex items-center justify-center gap-2 my-1">
+                        <span id="authCode" class="font-mono text-2xl font-bold text-white tracking-[0.3em]">------</span>
+                        <button id="authCopyBtn" class="text-[10px] px-2 py-1 rounded border border-hyper-border hover:text-hyper-teal hover:border-hyper-teal transition-colors">Copy</button>
+                    </div>
+                    <a id="authDeepLink" href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="mt-1 block text-center text-[11px] py-1.5 rounded-md bg-hyper-teal text-hyper-bg font-bold">Open Bot &amp; Confirm</a>
+                    <div id="authStatus" class="text-[10px] text-hyper-muted2 mt-2 flex items-center justify-center gap-1.5"><span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…</div>
+                </div>
+            </div>
+            <button id="authEmailBtn" class="w-full text-[12px] py-2.5 rounded-lg border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors mb-2">📧 Use email instead</button>
+            <button id="authCloseBtn" class="w-full text-[11px] text-hyper-muted hover:text-white transition-colors">Cancel</button>
+        </div>
+    </div>
 
     <script>
         // ===== TOAST-уведомления (всегда видны на странице, не зависят от ОС) =====
@@ -803,12 +1282,18 @@
             const area = $('profileArea');
             if (!profile) {
                 area.innerHTML = '<button id="signInBtn" class="text-[11px] font-semibold px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors uppercase tracking-wider">Sign in</button>';
-                $('signInBtn').addEventListener('click', promptSignIn);
+                $('signInBtn').addEventListener('click', openAuth);
                 return;
             }
             const emailRow = profile.email
                 ? `<div class="text-hyper-muted2 text-[11px] mb-3 font-mono truncate">${esc(profile.email)}</div>`
                 : '<button id="addEmailBtn" class="w-full mb-3 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Add email — needed for linking</button>';
+            const walletRow = profile.wallet
+                ? `<div class="text-hyper-muted2 text-[11px] mb-3 font-mono truncate">★ Your wallet: ${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}</div>`
+                : '<button id="setWalletBtn" class="w-full mb-3 text-[11px] px-3 py-1.5 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">＋ Set your wallet (shown by default)</button>';
+            const tgRow = (profile.tg && profile.tg.username)
+                ? `<div class="flex items-center gap-1.5 text-[11px] text-hyper-teal mb-3"><span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked as @${esc(profile.tg.username)}</div>`
+                : '';
             area.innerHTML = `<div class="relative">
                 <button id="profileBtn" class="flex items-center gap-2 text-[12px]">
                     <span class="w-6 h-6 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc((profile.name || profile.email || '?').slice(0, 1).toUpperCase())}</span>
@@ -818,6 +1303,8 @@
                     <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1">Account</div>
                     <div class="text-white font-semibold text-sm">${esc(profile.name || 'Trader')}</div>
                     ${emailRow}
+                    ${walletRow}
+                    ${tgRow}
                     <div class="text-[10px] uppercase tracking-[0.15em] text-hyper-muted mb-1.5">Telegram alerts</div>
                     <div class="flex gap-2 mb-2">
                         <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="flex-1 text-center text-[11px] px-2 py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors font-semibold">✈️ Open bot</a>
@@ -854,6 +1341,19 @@
                 saveProfile(); renderProfile();
             });
             $('createCodeBtn').addEventListener('click', startTgLink);
+            const setW = $('setWalletBtn');
+            if (setW) setW.addEventListener('click', () => {
+                const a = prompt('Your Hyperliquid wallet address (0x + 40 hex chars).\nSaved to your account and pre-filled next time.');
+                if (!a) return;
+                if (!/^0x[0-9a-fA-F]{40}$/.test(a.trim())) { alert('Invalid address format.'); return; }
+                profile.wallet = a.trim().toLowerCase();
+                profile.wallets = profile.wallets || [];
+                if (!profile.wallets.includes(profile.wallet)) profile.wallets.push(profile.wallet);
+                profile.lastWallet = profile.wallet;
+                saveProfile(); renderProfile(); renderChips();
+                $('walletAddress').value = profile.wallet;
+                trackWallet();
+            });
             $('tgCopyBtn').addEventListener('click', () => {
                 const code = $('tgCode').textContent.trim();
                 if (navigator.clipboard) navigator.clipboard.writeText(code);
@@ -889,11 +1389,13 @@
 
         // ===== ПРИВЯЗКА TELEGRAM: сайт даёт код, юзер пишет /link CODE боту =====
         let tgPollTimer = null;
-        async function startTgLink() {
-            const btn = $('createCodeBtn');
-            const box = $('tgLinkBox');
+        async function startTgLink(ids) {
+            ids = ids || { btn: 'createCodeBtn', box: 'tgLinkBox', code: 'tgCode', link: 'tgDeepLink', status: 'tgLinkedStatus' };
+            const btn = $(ids.btn);
+            const box = $(ids.box);
+            if (!btn || !box) return;
             box.classList.remove('hidden');
-            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…';
+            $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-yellow animate-pulse"></span> Waiting for confirmation…';
             btn.disabled = true;
             try {
                 const r = await fetch('/api/tg/link/start', {
@@ -903,18 +1405,25 @@
                 });
                 const j = await r.json();
                 if (!r.ok) { alert('Telegram linking is temporarily unavailable. Try later.'); return; }
-                $('tgCode').textContent = j.code;
-                if (j.deep_link) $('tgDeepLink').href = j.deep_link;
+                $(ids.code).textContent = j.code;
+                if (j.deep_link) $(ids.link).href = j.deep_link;
                 clearInterval(tgPollTimer);
                 tgPollTimer = setInterval(async () => {
                     try {
                         const s = await (await fetch('/api/tg/link/status/' + j.code)).json();
                         if (s.status === 'linked') {
                             clearInterval(tgPollTimer);
-                            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked! Check your Telegram DMs.';
+                            $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-teal"></span> ✅ Linked! Check your Telegram DMs.';
+                            if (profile) {
+                                profile.tg = { username: s.tg_username || null, chat_id: s.chat_id || null };
+                                if (!profile.name) profile.name = s.tg_username ? '@' + s.tg_username : 'Trader';
+                                saveProfile();
+                                renderProfile();
+                            }
+                            showToast('Telegram linked ✅', 'Signed in' + ((profile && profile.tg && profile.tg.username) ? ' as @' + profile.tg.username : '') + ' — trial started.', false);
                         } else if (s.status === 'expired' || s.status === 'not_found') {
                             clearInterval(tgPollTimer);
-                            $('tgLinkedStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-red"></span> Code expired — create a new one.';
+                            $(ids.status).innerHTML = '<span class="w-2 h-2 rounded-full bg-hyper-red"></span> Code expired — create a new one.';
                         }
                     } catch(e) {}
                 }, 3000);
@@ -924,6 +1433,49 @@
                 btn.disabled = false;
             }
         }
+
+        // ===== AUTH ("Continue with RustDeck"): список аккаунтов + вход через Telegram =====
+        function openAuth() {
+            const modal = $('authModal');
+            $('authSub').textContent = 'Choose an account';
+            const acc = $('authAccounts');
+            if (profile && profile.tg && profile.tg.username) {
+                acc.innerHTML = `<button id="authContinueBtn" class="w-full flex items-center gap-3 bg-hyper-bg border border-hyper-teal/40 rounded-xl p-3 mb-1 hover:border-hyper-teal transition-colors text-left">
+                    <span class="w-9 h-9 rounded-full bg-hyper-teal/15 text-hyper-teal flex items-center justify-center font-bold">${esc((profile.name || 'R').slice(0, 1).toUpperCase())}</span>
+                    <span class="flex-1 min-w-0">
+                        <span class="block text-[12px] font-semibold text-white truncate">Continue as ${esc(profile.name || '@' + profile.tg.username)}</span>
+                        <span class="block text-[10px] text-hyper-muted2 font-mono truncate">${profile.email ? esc(profile.email) : '@' + esc(profile.tg.username)}</span>
+                    </span>
+                    <span class="text-hyper-teal text-[11px]">→</span>
+                </button>`;
+                $('authContinueBtn').addEventListener('click', () => {
+                    $('authModal').classList.add('hidden');
+                    showToast('Signed in', 'Welcome back, ' + (profile.name || '@' + profile.tg.username), false);
+                });
+            } else {
+                acc.innerHTML = '<div class="text-[11px] text-hyper-muted2 text-center bg-hyper-bg border border-hyper-border rounded-xl p-3">No saved accounts in this browser yet.</div>';
+            }
+            $('authTgBox').classList.add('hidden');
+            modal.classList.remove('hidden');
+        }
+
+        $('authTgBtn').addEventListener('click', () => {
+            if (!profile) {
+                profile = { name: '', email: null, wallets: [], alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true }, lastWallet: '' };
+                saveProfile();
+            }
+            $('authTgBox').classList.remove('hidden');
+            startTgLink({ btn: 'authTgBtn', box: 'authTgBox', code: 'authCode', link: 'authDeepLink', status: 'authStatus' });
+        });
+        $('authCopyBtn').addEventListener('click', () => {
+            const code = $('authCode').textContent.trim();
+            if (navigator.clipboard) navigator.clipboard.writeText(code);
+            $('authCopyBtn').textContent = '✓ Copied';
+            setTimeout(() => { $('authCopyBtn').textContent = 'Copy'; }, 1500);
+        });
+        $('authEmailBtn').addEventListener('click', () => { $('authModal').classList.add('hidden'); promptSignIn(); });
+        $('authCloseBtn').addEventListener('click', () => $('authModal').classList.add('hidden'));
+        $('authModal').addEventListener('click', e => { if (e.target === $('authModal')) $('authModal').classList.add('hidden'); });
 
         // ===== СОХРАНЁННЫЕ КОШЕЛЬКИ =====
         function renderChips() {
@@ -939,7 +1491,7 @@
             wrap.classList.remove('hidden');
             wrap.innerHTML = wallets.map(w => `
                 <span class="wallet-chip ${w === currentWalletAddr ? 'active' : ''}" data-w="${w}" title="${w}">
-                    ${w.slice(0, 6)}…${w.slice(-4)}
+                    ${w === profile.wallet ? '★ ' : ''}${w.slice(0, 6)}…${w.slice(-4)}
                     <span class="chip-x" data-x="${w}" title="Remove">✕</span>
                 </span>`).join('');
             const isSaved = wallets.includes(currentWalletAddr);
@@ -959,7 +1511,7 @@
     <script>
         // ===== LIVE ALERTS (звук + браузерные уведомления) =====
         function getAlerts() {
-            return (profile && profile.alerts) || { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, sound: true };
+            return (profile && profile.alerts) || { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true };
         }
         function setAlerts(a) {
             if (!profile) return;
@@ -987,6 +1539,7 @@
             $('evClose').checked = a.onClose;
             $('evLiq').checked = a.onLiq;
             $('evFill').checked = a.onFill;
+            $('evOrders').checked = a.onOrders !== false;
             $('evSound').checked = a.sound;
             updatePermBadge();
         }
@@ -1021,7 +1574,7 @@
     <script>
         function fireAlert(ev, force) {
             const a = getAlerts();
-            const allowed = { open: a.onOpen, close: a.onClose, close_profit: a.onClose, close_loss: a.onClose, liq: a.onLiq, fill: a.onFill, info: true };
+            const allowed = { open: a.onOpen, close: a.onClose, close_profit: a.onClose, close_loss: a.onClose, liq: a.onLiq, fill: a.onFill, order: a.onOrders !== false, info: true };
             if (!force && !allowed[ev.type]) return;
             addFeedItem(ev);
             const bad = ev.type === 'liq' || ev.type === 'close_loss';
@@ -1055,9 +1608,9 @@
                         text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · PnL ${pnlSign(t.closed_pnl)}`
                     });
                 } else if (/open/i.test(dir)) {
-                    events.push({ type: 'open', title: 'Position opened', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${t.sz}` });
+                    events.push({ type: 'open', title: 'Position opened', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${fmtPrice(t.sz)}` });
                 } else {
-                    events.push({ type: 'fill', title: 'New fill', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${t.sz}` });
+                    events.push({ type: 'fill', title: 'New fill', text: `${t.coin} ${dir} @ $${fmtPrice(t.px)} · size ${fmtPrice(t.sz)}` });
                 }
             });
 
@@ -1075,6 +1628,22 @@
                 if (!prevPos[c]) {
                     events.push({ type: 'open', title: 'Position opened', text: `${c} ${nowPos[c].side} · $${fmtUsd(nowPos[c].size_usd)} @ $${fmtPrice(nowPos[c].entry)}` });
                 }
+            });
+
+            // Лимитки / TP / SL: появление и снятие ордеров
+            const prevOrd = {}, nowOrd = {};
+            (prev.open_orders || []).forEach(o => prevOrd[o.coin + '|' + o.side + '|' + o.price + '|' + o.size] = o);
+            (d.open_orders || []).forEach(o => nowOrd[o.coin + '|' + o.side + '|' + o.price + '|' + o.size] = o);
+            Object.keys(nowOrd).forEach(k => {
+                if (prevOrd[k]) return;
+                const o = nowOrd[k];
+                const kind = o.is_trigger ? 'Stop/TP order' : 'Limit order';
+                events.push({ type: 'order', title: '🧾 ' + kind, text: `${o.coin} ${o.side} · ${fmtPrice(o.size)} @ $${fmtPrice(o.price)}` });
+            });
+            Object.keys(prevOrd).forEach(k => {
+                if (nowOrd[k]) return;
+                const o = prevOrd[k];
+                events.push({ type: 'order', title: '🗑 Order removed', text: `${o.coin} ${o.side} @ $${fmtPrice(o.price)}` });
             });
             return events;
         }
@@ -1118,7 +1687,7 @@
         });
 
         $('alertsGear').addEventListener('click', () => $('alertsSettings').classList.toggle('hidden'));
-        [['evOpen','onOpen'], ['evClose','onClose'], ['evLiq','onLiq'], ['evFill','onFill'], ['evSound','sound']].forEach(([id, key]) => {
+        [['evOpen','onOpen'], ['evClose','onClose'], ['evLiq','onLiq'], ['evFill','onFill'], ['evOrders','onOrders'], ['evSound','sound']].forEach(([id, key]) => {
             $(id).addEventListener('change', function() {
                 const a = getAlerts();
                 a[key] = this.checked;

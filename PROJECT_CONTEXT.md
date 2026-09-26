@@ -50,7 +50,12 @@ riskcalc/
   на аккаунт, фоновый поток опрашивает HL раз в 60с, шлёт в TG: открытие/закрытие позиции,
   ликвидация, любые филлы; дедупликация — один опрос HL на адрес, даже если за ним следят
   несколько юзеров), /watching (список N/5), /unwatch [0x…] (одного или всех), /status,
-  /help. Все сообщения на английском. Привязка сайт↔бот через 6-значный код (15 мин):
+  /help. Все сообщения на английском. Числа в уведомлениях: _fmt_small (6 значащих
+  цифр — 0.004362, не 0.0044; >=1000 с запятыми). Watcher также видит ЛИМИТКИ/TP/SL
+  (frontendOpenOrders в снапшоте): "🧾 Limit order / Stop/TP order / 🗑 Order removed".
+  ЦЕНОВЫЕ АЛЕРТЫ: /alert BTC > 90000 (и <), /alerts (список с текущей ценой),
+  /delalert N, /clearalerts; лимит 10 на аккаунт; проверка в общем цикле (allMids
+  одним запросом на всех). Привязка сайт↔бот через 6-значный код (15 мин):
   профиль на хабе → "🔑 Create code" (+email) → юзер пишет /link КОД боту.
   АВТОРИЗАЦИЯ = EMAIL: аккаунт-ID из профиля (без пароля и без писем — экономия RAM).
   ОДИН ТРИАЛ на Telegram И один на email (повторный email на другом чате → tier=free).
@@ -80,6 +85,24 @@ riskcalc/
   * RUSTDECK SCORE: карточка с грейдом (S/A/B/C/D) и 0-100 очков (win rate 30 + profit
     factor 25 + avg win/loss 20 + просадка 25), серии побед/поражений, max drawdown USD.
     Кнопки 👁 (follow в TG) в Whale Feed и лидерборде; "✈️ Watch in TG" у трекера (deep-link).
+  * ГРАФИК: вкладки Account Value / PNL / Perps PNL (плавные кривые, не ступеньки) +
+    периоды 24H/7D/30D/All; курсор даёт crosshair и значения (дата + сумма). Account Value —
+    accountValueHistory из API portfolio, Perps PNL — кумулятив закрытых филлов.
+  * КАЛЬКУЛЯТОР ПОЗИЦИЙ (#calc): тикер в любом регистре (btc/ETH/hype) → свечи /api/candles,
+    линии Entry/SL/TP/LIQ + текущая цена (как на HL), hover — OHLC. Решатель: плечо ОБЯЗАТЕЛЬНО
+    (слайдер до 40x, пресеты 1x/3x/5x/10x), риск $/%, R:R (1:2/1:3/1:4). Любые достаточные
+    данные → всё остальное: тейк из R:R, стоп из риска, капитал из риска+стопа, риск из
+    капитала+стопа. Комиссии 0.045%×2. Выводы: размер, кол-во, маржа, риск, ликвидация,
+    R:R, PnL при TP/SL.
+  * АВТОРИЗАЦИЯ: модалка "Sign in to RustDeck" в стиле «Continue with» — аккаунт-пикер
+    ("Continue as @user"), "Continue with Telegram" (код + deep-link + автоопрос),
+    "Use email instead". tg_username/chat_id из /api/tg/link/status сохраняются в профиль.
+  * Кошелёк аккаунта: при трекинге сразу сохраняется в аккаунт (первый = ★ default, чип с ★),
+    кнопка "＋ Set your wallet" в панели; ★-кошелёк подставляется при входе.
+  * Боковые баннеры (≥1500px): реф Hyperliquid, How it works, TG-бот, /score.
+  * Фавикон RustDeck (тёмный квадрат, "R" + молния) на хабе и калькуляторе.
+  * Алерты: тумблер "Limit orders (placed/removed)"; fmtPrice не теряет мелкие цифры
+    (0.004362 вместо 0.0044).
   * OPEN ORDERS: таблица лимиток/TP/SL (frontendOpenOrders) в результатах трекера.
   * EXPORT CSV: кнопка у Recent Trades → /api/fills/{address}?limit=500 → скачивание.
   * WHALE FEED: лента сделок >= $250K у топ-40 китов HL за 24ч (бейджи OPEN/WIN/LOSS/LIQ),
@@ -98,10 +121,13 @@ riskcalc/
   * WIN RATE карточка: + Profit Factor (∞ когда нет убытков) и Avg win / Avg loss.
 - Host-роутинг: ОДИН сервис riskcalc.onrender.com: rustdeck.app → хаб,
   calc.rustdeck.app/localhost → калькулятор
-- smoke_test.py — все роуты, host-роутинг, /api/wallet (+pnl_charts/profit_factor/score/
-  streaks/max_drawdown_usd), /api/funding, /api/markets, /api/fills, /api/leaderboard,
-  /api/whales, логика одного-триала, watch ×5, мульти-кошельки (2 адреса, дубликаты,
-  /unwatch 0x, лимит 5), email-триал (один на email), deep-link /start watch_0x…
+- /score/{address} — публичная карточка RustDeck Score (noindex + OG-теги) для шаринга в TG/X
+- smoke_test.py — все роуты, host-роутинг, /api/wallet (+pnl_charts/value_charts/perp_chart/
+  profit_factor/score/streaks/max_drawdown_usd), /api/funding, /api/markets, /api/fills,
+  /api/assets, /api/candles (btc lowercase + 404 на notacoin), /score-страница,
+  /api/leaderboard, /api/whales, логика одного-триала, link status (tg_username),
+  _fmt_small (0.004362), watch ×5, мульти-кошельки (2 адреса, дубликаты, /unwatch 0x,
+  лимит 5), email-триал (один на email), deep-link /start watch_0x…, /alert+ /delalert
 
 ## TELEGRAM-БОТ (сделано)
 - @RustDeckcryptobot — работает ВНУТРИ FastAPI (фоновый поток long polling,

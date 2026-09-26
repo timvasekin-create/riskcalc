@@ -11,6 +11,8 @@ Telegram-бот RustDeck (@RustDeckcryptobot)
   /link <код>   — привязка Telegram к сайту (пробный период 7 дней)
   /prices       — живые цены топ-5 монет
   /top          — топ-5 трейдеров дня
+  /alert BTC>90000 — ценовой алерт (и <)
+  /alerts, /delalert N, /clearalerts — управление алертами
   /watch 0x…    — слежение за кошельками HL 24/7 (до 5 на аккаунт)
   /watching     — список отслеживаемых кошельков
   /unwatch [0x…]— остановить одного или всех
@@ -36,6 +38,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rustdeck.db"
 TRIAL_DAYS = 7          # пробный период при привязке
 CODE_TTL = 15 * 60      # код привязки живёт 15 минут
 WATCH_LIMIT = 5         # максимум кошельков на аккаунт (мульти-/watch)
+ALERT_LIMIT = 10        # максимум ценовых алертов на аккаунт (/alert)
 
 _db_lock = threading.Lock()
 _bot_username_cache = {"name": None, "ts": 0.0}
@@ -66,6 +69,13 @@ def init_db():
             tier       TEXT NOT NULL DEFAULT 'trial',    -- trial | free | pro
             expires_at REAL,
             linked_at  REAL
+        );
+        CREATE TABLE IF NOT EXISTS price_alerts (
+            chat_id    INTEGER NOT NULL,
+            sym        TEXT NOT NULL,
+            op         TEXT NOT NULL,      -- '>' | '<'
+            target     REAL NOT NULL,
+            created_at REAL NOT NULL
         );
         """)
         # Миграции: колонки отслеживаемых кошельков и email (аккаунт с сайта)
@@ -104,6 +114,20 @@ def send_message(chat_id, text, reply_markup=None):
         _tg("sendMessage", payload)
     except Exception:
         pass
+
+
+def _fmt_small(v):
+    """Формат чисел без потери значащих цифр: 0.004362 (а не 0.0044), крупные — с запятыми."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    a = abs(v)
+    if a == 0:
+        return "0"
+    if a >= 1000:
+        return f"{v:,.2f}"
+    return f"{v:g}"
 
 
 def get_bot_username():
@@ -163,6 +187,8 @@ def link_code_status(code):
         conn.close()
         return {
             "status": "linked",
+            "chat_id": row["chat_id"],
+            "tg_username": sub["username"] if sub else None,
             "tier": sub["tier"] if sub else "trial",
             "expires_at": sub["expires_at"] if sub else None,
         }
@@ -206,7 +232,21 @@ def _wallet_snapshot(addr):
         fill_keys.add(
             f"{f.get('time')}|{f.get('coin')}|{f.get('side')}|{f.get('px')}|{f.get('sz')}"
         )
-    return {"positions": positions, "fill_keys": fill_keys}
+    # Открытые ордера (лимитки, TP/SL) — для уведомлений о появлении/снятии
+    orders = {}
+    try:
+        for o in _hl_post({"type": "frontendOpenOrders", "user": addr}) or []:
+            k = f"{o.get('coin')}|{o.get('side')}|{o.get('limitPx') or o.get('triggerPx')}|{o.get('sz')}"
+            orders[k] = {
+                "coin": o.get("coin"),
+                "side": o.get("side"),
+                "px": float(o.get("limitPx") or o.get("triggerPx") or 0),
+                "sz": float(o.get("sz") or 0),
+                "is_trigger": bool(o.get("isTrigger")),
+            }
+    except Exception:
+        pass
+    return {"positions": positions, "fill_keys": fill_keys, "orders": orders}
 
 
 def _parse_watched(raw):
@@ -266,27 +306,66 @@ def _watch_loop():
                         continue
                     dir_s = f.get("dir") or f.get("side") or ""
                     if "iquidat" in dir_s:
-                        events.append(f"💥 *LIQUIDATION:* {f.get('coin')} {dir_s} @ ${px:,.4g} · PnL ${pnl:+,.2f}")
+                        events.append(f"💥 *LIQUIDATION:* {f.get('coin')} {dir_s} @ ${_fmt_small(px)} · PnL ${pnl:+,.2f}")
                     elif pnl != 0:
                         emoji = "🟢" if pnl > 0 else "🔴"
-                        events.append(f"{emoji} *Position closed:* {f.get('coin')} {dir_s} @ ${px:,.4g} · PnL ${pnl:+,.2f}")
+                        events.append(f"{emoji} *Position closed:* {f.get('coin')} {dir_s} @ ${_fmt_small(px)} · PnL ${pnl:+,.2f}")
                     elif "open" in dir_s.lower():
-                        events.append(f"🟢 *Position opened:* {f.get('coin')} {dir_s} @ ${px:,.4g} · size {sz:g}")
+                        events.append(f"🟢 *Position opened:* {f.get('coin')} {dir_s} @ ${_fmt_small(px)} · size {_fmt_small(sz)}")
                     else:
-                        events.append(f"🔔 *Fill:* {f.get('coin')} {dir_s} @ ${px:,.4g} · size {sz:g}")
+                        events.append(f"🔔 *Fill:* {f.get('coin')} {dir_s} @ ${_fmt_small(px)} · size {_fmt_small(sz)}")
 
                 prev_pos, now_pos = prev["positions"], snap["positions"]
                 for c in now_pos:
                     if c not in prev_pos and not any("opened" in e for e in events):
                         p = now_pos[c]
-                        events.append(f"🟢 *Position opened:* {c} {p['side']} · ${p['size_usd']:,.0f} @ ${p['entry']:,.4g}")
+                        events.append(f"🟢 *Position opened:* {c} {p['side']} · ${p['size_usd']:,.0f} @ ${_fmt_small(p['entry'])}")
                 for c in prev_pos:
                     if c not in now_pos and not any("closed" in e or "LIQUIDATION" in e for e in events):
                         events.append(f"🔒 *Position closed:* {c}")
 
+                # Лимитки / TP / SL: появление и снятие ордеров
+                prev_o, now_o = prev.get("orders", {}), snap.get("orders", {})
+                for k, o in now_o.items():
+                    if k in prev_o or any(o["coin"] in e for e in events):
+                        continue
+                    kind = "Stop/TP order" if o["is_trigger"] else "Limit order"
+                    events.append(f"🧾 *{kind}:* {o['coin']} {o['side']} · {_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}")
+                for k, o in prev_o.items():
+                    if k in now_o or any(o["coin"] in e for e in events):
+                        continue
+                    events.append(f"🗑 *Order removed:* {o['coin']} {o['side']} @ ${_fmt_small(o['px'])}")
+
                 for ev in events:
                     for cid in chat_ids:
                         send_message(cid, ev)
+
+            # Ценовые алерты: один запрос цен на всех юзеров
+            try:
+                conn = _db()
+                pa = conn.execute("SELECT rowid, chat_id, sym, op, target FROM price_alerts").fetchall()
+                conn.close()
+                if pa:
+                    prices = _hl_prices({a["sym"] for a in pa})
+                    for a in pa:
+                        p = prices.get(a["sym"])
+                        if p is None:
+                            continue
+                        hit = (a["op"] == ">" and p >= a["target"]) or (a["op"] == "<" and p <= a["target"])
+                        if not hit:
+                            continue
+                        op_txt = "above" if a["op"] == ">" else "below"
+                        send_message(
+                            a["chat_id"],
+                            f"🔔 *Price alert:* {a['sym']} crossed {op_txt} ${_fmt_small(a['target'])}\n"
+                            f"Now: *${_fmt_small(p)}*",
+                        )
+                        conn = _db()
+                        conn.execute("DELETE FROM price_alerts WHERE rowid=?", (a["rowid"],))
+                        conn.commit()
+                        conn.close()
+            except Exception:
+                pass
         except Exception:
             pass
         time.sleep(60)
@@ -521,6 +600,112 @@ def _cmd_prices(chat_id):
     send_message(chat_id, "\n".join(lines))
 
 
+def _hl_prices(syms=None):
+    """Цены перпов Hyperliquid (allMids): {SYM: float} или только нужные символы."""
+    try:
+        mids = _hl_post({"type": "allMids"}) or {}
+    except Exception:
+        return {}
+    out = {}
+    for k, v in mids.items():
+        try:
+            out[k.upper()] = float(v)
+        except (TypeError, ValueError):
+            continue
+    if syms:
+        return {s: out[s] for s in syms if s in out}
+    return out
+
+
+def _cmd_alert(chat_id, username, text):
+    """/alert BTC > 90000 — уведомление при пересечении цены."""
+    m = re.fullmatch(
+        r"/alert\s+([A-Za-z0-9@][A-Za-z0-9@\-]{0,11})\s*([<>])\s*([0-9]*\.?[0-9]+)",
+        (text or "").strip(),
+        re.IGNORECASE,
+    )
+    if not m:
+        send_message(chat_id, "Usage: `/alert BTC > 90000` or `/alert ETH < 2500`\nSee all: /alerts")
+        return
+    sym, op, target = m.group(1).upper(), m.group(2), float(m.group(3))
+    conn = _db()
+    sub = conn.execute("SELECT 1 FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+    if not sub:
+        conn.close()
+        send_message(chat_id, "First link your account: sign in on rustdeck.app → “Create link code” → send me `/link <code>`.")
+        return
+    cnt = conn.execute("SELECT COUNT(*) FROM price_alerts WHERE chat_id=?", (chat_id,)).fetchone()[0]
+    if cnt >= ALERT_LIMIT:
+        conn.close()
+        send_message(chat_id, f"⚠️ Alert limit reached ({ALERT_LIMIT}). Remove one: `/delalert 1`")
+        return
+    conn.close()
+    price = _hl_prices({sym}).get(sym)
+    if price is None:
+        send_message(chat_id, f"Unknown asset `{sym}`. Use a Hyperliquid perp ticker, e.g. BTC, ETH, SOL, HYPE.")
+        return
+    conn = _db()
+    conn.execute(
+        "INSERT INTO price_alerts (chat_id, sym, op, target, created_at) VALUES (?, ?, ?, ?, ?)",
+        (chat_id, sym, op, target, time.time()),
+    )
+    conn.commit()
+    conn.close()
+    op_txt = "above" if op == ">" else "below"
+    send_message(
+        chat_id,
+        f"🔔 *Alert set:* {sym} goes {op_txt} ${_fmt_small(target)}\n"
+        f"Current price: ${_fmt_small(price)}\n\nSee all: /alerts",
+    )
+
+
+def _cmd_alerts(chat_id):
+    conn = _db()
+    rows = conn.execute(
+        "SELECT sym, op, target FROM price_alerts WHERE chat_id=? ORDER BY created_at", (chat_id,)
+    ).fetchall()
+    conn.close()
+    if not rows:
+        send_message(chat_id, "No price alerts yet. Example: `/alert BTC > 90000`")
+        return
+    prices = _hl_prices({r["sym"] for r in rows})
+    lines = ["🔔 *Your price alerts:*"]
+    for i, r in enumerate(rows, 1):
+        cur = prices.get(r["sym"])
+        cur_s = f" → now ${_fmt_small(cur)}" if cur is not None else ""
+        lines.append(f"{i}. {r['sym']} {r['op']} ${_fmt_small(r['target'])}{cur_s}")
+    lines.append("\nRemove: `/delalert N` · All: /clearalerts")
+    send_message(chat_id, "\n".join(lines))
+
+
+def _cmd_delalert(chat_id, text):
+    m = re.fullmatch(r"/(?:delete|del)alert\s+(\d+)", (text or "").strip(), re.IGNORECASE)
+    if not m:
+        send_message(chat_id, "Usage: `/delalert 1` (number from /alerts)")
+        return
+    n = int(m.group(1))
+    conn = _db()
+    rows = conn.execute(
+        "SELECT rowid FROM price_alerts WHERE chat_id=? ORDER BY created_at", (chat_id,)
+    ).fetchall()
+    if n < 1 or n > len(rows):
+        conn.close()
+        send_message(chat_id, "No such alert — check /alerts")
+        return
+    conn.execute("DELETE FROM price_alerts WHERE rowid=?", (rows[n - 1]["rowid"],))
+    conn.commit()
+    conn.close()
+    send_message(chat_id, f"✅ Alert #{n} removed.")
+
+
+def _cmd_clearalerts(chat_id):
+    conn = _db()
+    conn.execute("DELETE FROM price_alerts WHERE chat_id=?", (chat_id,))
+    conn.commit()
+    conn.close()
+    send_message(chat_id, "✅ All price alerts removed.")
+
+
 def _cmd_watch(chat_id, username, text):
     parts = text.split(maxsplit=1)
     addr = parts[1].strip() if len(parts) > 1 else ""
@@ -726,6 +911,14 @@ def handle_update(update):
         _cmd_prices(chat_id)
     elif text == "/top":
         _cmd_top(chat_id)
+    elif text == "/alerts":
+        _cmd_alerts(chat_id)
+    elif text == "/clearalerts":
+        _cmd_clearalerts(chat_id)
+    elif text.startswith("/delalert") or text.startswith("/deletealert"):
+        _cmd_delalert(chat_id, text)
+    elif text.startswith("/alert"):
+        _cmd_alert(chat_id, username, text)
     elif text.startswith("/watch") and not text.startswith("/watching"):
         _cmd_watch(chat_id, username, text)
     elif text.startswith("/unwatch"):
@@ -743,6 +936,9 @@ def handle_update(update):
             "*RustDeck — commands:*\n"
             "/prices — live prices of top-5 coins\n"
             "/top — top-5 traders today (PnL)\n"
+            "/alert BTC > 90000 — price alert (also <)\n"
+            "/alerts — your price alerts\n"
+            "/delalert N · /clearalerts — remove alerts\n"
             "/watch 0x… — watch any Hyperliquid wallet 24/7\n"
             "  (paste the FULL wallet address; up to 5 wallets)\n"
             "/watching — list your watched wallets\n"

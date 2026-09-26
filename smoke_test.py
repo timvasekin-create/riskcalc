@@ -98,9 +98,12 @@ try:
                  "fundingHigh", "profileArea", "alertsToggle", "exportCsvBtn", "ordersTable",
                  "walletChips", "detectEvents", "whaleList", "lbTable", "lbToggles", "refreshWalletBtn",
                  "chartBlock", "chartToggles", "pnlChart", "stPF",
-                 "scoreBlock", "scoreGrade", "followTgBtn", "startTgLink", "tgDeepLink", "</html>"]:
+                 "scoreBlock", "scoreGrade", "followTgBtn", "startTgLink", "tgDeepLink",
+                 "chartTabs", "chartTip", "authModal", "authTgBtn", "evOrders", "side-rail",
+                 "calcTicker", "calcChart", "loadCalcTicker", "setWalletBtn", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
-    assert "Calculate Position" not in hub, "хаб не должен быть калькулятором"
+    assert "Position Calculator" in hub, "на хабе должен быть калькулятор позиций"
+    assert "calcChart" in hub, "на хабе нет графика калькулятора"
     log("HUB OK: rustdeck.app отдаёт wallet-tracker хаб")
 
     req2 = urllib.request.Request(BASE + "/", headers={"Host": "calc.rustdeck.app"})
@@ -126,6 +129,8 @@ try:
         assert "score" in w["stats"], "нет score в stats (RustDeck Score)"
         assert "streaks" in w["stats"], "нет streaks в stats"
         assert "max_drawdown_usd" in w["stats"], "нет max_drawdown_usd в stats"
+        assert "value_charts" in w, "нет value_charts (график Account Value)"
+        assert "perp_chart" in w, "нет perp_chart (вкладка Perps PnL)"
     except urllib.error.HTTPError as e:
         log(f"WALLET API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:
@@ -159,6 +164,35 @@ try:
         log(f"FILLS API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:
         log("FILLS API WARN:", repr(e))
+
+    # Assets + Candles API (встроенный калькулятор позиций)
+    try:
+        status, body = get("/api/assets", timeout=20)
+        assets = json.loads(body).get("assets", [])
+        log(f"ASSETS API: {status}, {len(assets)} активов (BTC={'BTC' in assets})")
+    except Exception as e:
+        log("ASSETS WARN:", repr(e))
+    try:
+        status, body = get("/api/candles/btc?hours=24", timeout=25)  # регистр не важен
+        cj = json.loads(body)
+        n = len(cj.get("candles", []))
+        log(f"CANDLES API: {status}, {n} свечей, coin={cj.get('coin')}")
+        assert n > 5 and cj.get("coin") == "BTC", "свечи не пришли"
+    except Exception as e:
+        log("CANDLES WARN:", repr(e))
+    try:
+        get("/api/candles/notacoin", timeout=15)
+        log("CANDLES unknown: НЕ отклонён — ПРОВЕРИТЬ")
+    except urllib.error.HTTPError as e:
+        log(f"CANDLES unknown: {e.code} (ожидаемо 404)")
+
+    # Публичная страница RustDeck Score
+    try:
+        status, body = get("/score/0x000000000000000000000000000000000000dEaD", timeout=25)
+        assert "RustDeck Score" in body, "score-страница без заголовка"
+        log(f"SCORE PAGE: {status}, {len(body)} bytes OK")
+    except Exception as e:
+        log("SCORE PAGE WARN:", repr(e))
 
     # Leaderboard API (файл ~10MB, может грузиться до пары минут)
     try:
@@ -200,6 +234,16 @@ try:
         conn.close()
         assert abs(sub2["expires_at"] - sub1["expires_at"]) < 0.001, "trial ПРОДЛИЛСЯ — так нельзя!"
         log(f"TRIAL OK: expires_at не изменился при повторной привязке")
+
+        # Статус привязки возвращает tg_username/chat_id (нужно сайту для "Continue as")
+        st = _bot.link_code_status(c1)
+        assert st.get("status") == "linked" and st.get("tg_username") == "tester" and st.get("chat_id") == 777000, f"link status без tg_username: {st}"
+        log("LINK OK: /api/tg/link/status возвращает tg_username + chat_id")
+
+        # Формат чисел: 0.004362 не должен округляться до 0.0044
+        assert _bot._fmt_small(0.004362) == "0.004362", f"_fmt_small(0.004362) = {_bot._fmt_small(0.004362)}"
+        assert _bot._fmt_small(84250.5) == "84,250.50", f"_fmt_small(84250.5) = {_bot._fmt_small(84250.5)}"
+        log("FMT OK: мелкие числа с 6 значащими цифрами (0.004362), крупные — с запятыми")
 
         # /watch: привязка кошелька к подписке + /unwatch (адрес нормализуется в lowercase)
         _bot._cmd_watch(777000, 'tester', '/watch 0x000000000000000000000000000000000000dEaD')
@@ -311,6 +355,26 @@ try:
         conn.close()
         assert s3["watched_wallet"] == "0x0000000000000000000000000000000000000001", f"deep-link watch не сработал: {s3['watched_wallet']}"
         log("WATCH OK: deep-link /start watch_0x… запускает слежение из TG")
+
+        # ЦЕНОВЫЕ АЛЕРТЫ (/alert BTC > 1)
+        _bot._cmd_alert(777000, 'tester', '/alert btc > 1')
+        conn = _bot._db()
+        pa = conn.execute("SELECT sym, op, target FROM price_alerts WHERE chat_id=?", (777000,)).fetchall()
+        conn.close()
+        assert len(pa) == 1 and pa[0]["sym"] == "BTC" and pa[0]["op"] == ">", f"алерт не сохранился: {[dict(r) for r in pa]}"
+        log("ALERT OK: /alert btc > 1 — тикер нормализован в BTC")
+        _bot._cmd_alert(777000, 'tester', '/alert NOTACOIN > 5')
+        conn = _bot._db()
+        cnt = conn.execute("SELECT COUNT(*) FROM price_alerts WHERE chat_id=?", (777000,)).fetchone()[0]
+        conn.close()
+        assert cnt == 1, "неизвестный актив не должен сохраняться"
+        log("ALERT OK: неизвестный тикер отклонён")
+        _bot._cmd_delalert(777000, '/delalert 1')
+        conn = _bot._db()
+        cnt2 = conn.execute("SELECT COUNT(*) FROM price_alerts WHERE chat_id=?", (777000,)).fetchone()[0]
+        conn.close()
+        assert cnt2 == 0, "/delalert не удалил алерт"
+        log("ALERT OK: /delalert 1 удаляет алерт")
 
         conn = _bot._db()
         conn.execute("DELETE FROM subscribers WHERE chat_id IN (888001, 888002)")

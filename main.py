@@ -272,6 +272,25 @@ def _pnl_since(closed_trades: list, since_ms: float) -> float:
     """Суммарный реализованный PnL сделок, закрытых после since_ms."""
     return round(sum(t["pnl"] for t in closed_trades if t["time"] >= since_ms), 2)
 
+
+def _rustdeck_score(n_closed, win_rate, profit_factor, avg_win, avg_loss, base_value, max_dd):
+    """RustDeck Score 0-100 и грейд S/A/B/C/D.
+    win rate 30 + profit factor 25 + avg win/loss 20 + просадка 25."""
+    if not n_closed:
+        return None, None
+    s = min(win_rate or 0, 100) / 100 * 30
+    pf_capped = 3.0 if profit_factor in (None, 999.0) else min(profit_factor, 3.0)
+    s += pf_capped / 3.0 * 25
+    if avg_win and avg_loss:
+        s += min(abs(avg_win / avg_loss), 3.0) / 3.0 * 20
+    else:
+        s += 10
+    dd_pct = max_dd / max(base_value or 0, 100.0) * 100
+    s += max(0.0, 1 - dd_pct / 50) * 25
+    score = int(round(min(100.0, max(0.0, s))))
+    grade = "S" if score >= 85 else "A" if score >= 70 else "B" if score >= 55 else "C" if score >= 40 else "D"
+    return score, grade
+
 def _hl_info(payload: dict, timeout: float = 10.0):
     """POST к Hyperliquid info API."""
     return _fetch_json(HL_INFO_URL, payload=payload, timeout=timeout)
@@ -442,6 +461,8 @@ async def api_wallet(address: str):
     # PnL по периодам — НАПРЯМУЮ с API (portfolio, cumulative pnlHistory),
     # как в эксплорере HL. Фолбэк — сумма по филлам.
     pnl_periods = {}
+    pnl_charts = {}
+    value_charts = {}
     try:
         windows = {}
         for entry in portfolio or []:
@@ -454,7 +475,7 @@ async def api_wallet(address: str):
                 continue
             for k, v in items:
                 if isinstance(v, dict):
-                    windows[k] = v.get("pnlHistory")
+                    windows[k] = v
 
         def _period_pnl(hist):
             # pnlHistory — кумулятивный PnL: период = последний минус первый
@@ -481,18 +502,26 @@ async def api_wallet(address: str):
                     continue
             return out
 
+        def _hist(label):
+            return ((windows.get(label) or {}).get("pnlHistory")) or []
+
+        def _vhist(label):
+            return ((windows.get(label) or {}).get("accountValueHistory")) or []
+
         pnl_periods = {
-            "24h": _period_pnl(windows.get("day")),
-            "7d": _period_pnl(windows.get("week")),
-            "30d": _period_pnl(windows.get("month")),
-            "all": _period_pnl(windows.get("allTime")),
+            "24h": _period_pnl(_hist("day")),
+            "7d": _period_pnl(_hist("week")),
+            "30d": _period_pnl(_hist("month")),
+            "all": _period_pnl(_hist("allTime")),
         }
-        # Графики PnL по периодам (для карточки Chart)
-        pnl_charts = {}
+        # Графики по периодам (вкладки чарта: PnL / Account Value)
         for key, label in (("24h", "day"), ("7d", "week"), ("30d", "month"), ("all", "allTime")):
-            series = _pnl_series(windows.get(label) or [])
+            series = _pnl_series(_hist(label))
             if series:
                 pnl_charts[key] = series
+            vseries = _pnl_series(_vhist(label))
+            if vseries:
+                value_charts[key] = vseries
         if not pnl_charts:
             pnl_charts = {"all": [[int(now * 1000), round(realized, 2)]]}
     except Exception:
@@ -518,6 +547,15 @@ async def api_wallet(address: str):
         best_streak = max(best_streak, cur_win)
         worst_streak = max(worst_streak, cur_loss)
 
+    # Кумулятивный PnL по перпам (из закрытых сделок) — вкладка "Perps PNL"
+    perp_chart = []
+    cum_pnl = 0.0
+    for t in closed_sorted:
+        cum_pnl += t["pnl"]
+        perp_chart.append([int(t["time"] or 0), round(cum_pnl, 2)])
+    if len(perp_chart) > 120:
+        perp_chart = perp_chart[::max(1, len(perp_chart) // 120)]
+
     # Максимальная просадка по кумулятивной all-time кривой PnL
     max_dd = 0.0
     peak = None
@@ -530,24 +568,16 @@ async def api_wallet(address: str):
         max_dd = max(max_dd, peak - v)
     max_dd = round(max_dd, 2)
 
-    # RustDeck Score (0-100): win rate 30 + profit factor 25 + avg win/loss 20 + просадка 25
-    score = None
-    grade = None
-    if closed:
-        wr = wins / len(closed) * 100
-        s = min(wr, 100) / 100 * 30
-        pf_capped = 3.0 if profit_factor in (None, 999.0) else min(profit_factor, 3.0)
-        s += pf_capped / 3.0 * 25
-        if wins_list and losses_list and avg_loss:
-            rr = min(abs(avg_win / avg_loss), 3.0)
-            s += rr / 3.0 * 20
-        else:
-            s += 10
-        base = max(account_value + spot_value, 100.0)
-        dd_pct = max_dd / base * 100
-        s += max(0.0, 1 - dd_pct / 50) * 25
-        score = int(round(min(100.0, max(0.0, s))))
-        grade = "S" if score >= 85 else "A" if score >= 70 else "B" if score >= 55 else "C" if score >= 40 else "D"
+    # RustDeck Score 0-100 + грейд (общий helper — используется и на публичной странице)
+    score, grade = _rustdeck_score(
+        len(closed),
+        wins / len(closed) * 100 if closed else None,
+        profit_factor,
+        avg_win,
+        avg_loss,
+        account_value + spot_value,
+        max_dd,
+    )
 
     data_out = {
         "address": address,
@@ -580,6 +610,9 @@ async def api_wallet(address: str):
         "pnl_periods": pnl_periods,
         # График PnL: {period: [[t_ms, cumulative_pnl], ...]}
         "pnl_charts": pnl_charts,
+        # График Account Value (equity) и кумулятивный Perps PnL (вкладки чарта)
+        "value_charts": value_charts,
+        "perp_chart": perp_chart,
         "updated": int(now),
     }
     WALLET_CACHE[key] = {"data": data_out, "ts": now}
@@ -889,6 +922,164 @@ def _whale_refresh_loop():
 
 # Фоновый поток whale-ленты (стартует вместе с сервером)
 _threading.Thread(target=_whale_refresh_loop, daemon=True, name="rustdeck-whales").start()
+
+# ===== API: свечи и активы (для встроенного калькулятора позиций) =====
+ASSET_LIST_CACHE = {"ts": 0.0, "names": []}
+CANDLE_CACHE = {}
+
+def _asset_names():
+    """Названия перпов HL (кэш 10 мин)."""
+    now = _time.time()
+    if now - ASSET_LIST_CACHE["ts"] > 600 or not ASSET_LIST_CACHE["names"]:
+        try:
+            meta = _hl_info({"type": "meta"})
+            names = [u.get("name") for u in meta.get("universe") or [] if u.get("name")]
+            if names:
+                ASSET_LIST_CACHE.update({"ts": now, "names": names})
+        except Exception:
+            pass
+    return ASSET_LIST_CACHE["names"]
+
+@app.get("/api/assets")
+async def api_assets():
+    return {"assets": _asset_names()}
+
+@app.get("/api/candles/{coin}")
+async def api_candles(coin: str, interval: str = "1h", hours: int = 72):
+    """Свечи Hyperliquid: /api/candles/btc?hours=72 — регистр не важен."""
+    coin = (coin or "").strip().upper()
+    if not coin:
+        return JSONResponse({"error": "unknown_asset"}, status_code=404)
+    if not coin.startswith("@") and coin not in _asset_names():
+        return JSONResponse({"error": "unknown_asset", "hint": "Use a Hyperliquid perp ticker, e.g. BTC"}, status_code=404)
+    hours = max(6, min(hours, 240))
+    key = f"{coin}|{interval}|{hours}"
+    now = _time.time()
+    cached = CANDLE_CACHE.get(key)
+    if cached and now - cached["ts"] < 30:
+        return cached["data"]
+    try:
+        raw = _hl_info({
+            "type": "candleSnapshot",
+            "req": {"coin": coin, "interval": interval,
+                    "startTime": int((now - hours * 3600) * 1000),
+                    "endTime": int(now * 1000)},
+        })
+    except Exception:
+        return JSONResponse({"error": "exchange_unavailable"}, status_code=502)
+    candles = []
+    for c in raw or []:
+        try:
+            candles.append({"t": c["t"], "o": float(c["o"]), "h": float(c["h"]),
+                            "l": float(c["l"]), "c": float(c["c"])})
+        except (TypeError, ValueError, KeyError):
+            continue
+    data = {"coin": coin, "interval": interval, "candles": candles, "updated": int(now)}
+    if len(CANDLE_CACHE) > 60:
+        CANDLE_CACHE.clear()
+    CANDLE_CACHE[key] = {"data": data, "ts": now}
+    return data
+
+@app.get("/score/{address}", response_class=HTMLResponse)
+async def score_page(address: str):
+    """Публичная карточка RustDeck Score — шарится в TG/X."""
+    if not _re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        return HTMLResponse("<h1 style='font-family:sans-serif'>Invalid address</h1>", status_code=400)
+    address = address.lower()
+    try:
+        state = _hl_info({"type": "clearinghouseState", "user": address})
+        fills = _hl_info({"type": "userFills", "user": address})
+        portfolio = _hl_info({"type": "portfolio", "user": address})
+    except Exception:
+        return HTMLResponse("<h1 style='font-family:sans-serif'>Exchange unavailable, try later</h1>", status_code=502)
+
+    account_value = float((state.get("marginSummary") or {}).get("accountValue") or 0)
+    closed = []
+    for f in fills or []:
+        try:
+            pnl = float(f.get("closedPnl") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pnl != 0:
+            closed.append({"pnl": pnl, "time": f.get("time") or 0})
+    wins_list = [t["pnl"] for t in closed if t["pnl"] > 0]
+    losses_list = [t["pnl"] for t in closed if t["pnl"] < 0]
+    wins = len(wins_list)
+    gross_win = sum(wins_list)
+    gross_loss = abs(sum(losses_list))
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (None if not wins_list else 999.0)
+    avg_win = round(gross_win / len(wins_list), 2) if wins_list else None
+    avg_loss = round(sum(losses_list) / len(losses_list), 2) if losses_list else None
+    win_rate = round(wins / len(closed) * 100, 1) if closed else None
+
+    hist = []
+    try:
+        for entry in portfolio or []:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2 and entry[0] == "allTime" and isinstance(entry[1], dict):
+                hist = entry[1].get("pnlHistory") or []
+    except Exception:
+        hist = []
+    max_dd, peak = 0.0, None
+    for p in hist:
+        try:
+            val = float(p[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        peak = val if peak is None else max(peak, val)
+        max_dd = max(max_dd, peak - val)
+    max_dd = round(max_dd, 2)
+
+    score, grade = _rustdeck_score(len(closed), win_rate, profit_factor, avg_win, avg_loss, account_value, max_dd)
+    colors = {"S": "#50d2c1", "A": "#50d2c1", "B": "#f0b90b", "C": "#f0b90b", "D": "#f6465d"}
+    color = colors.get(grade or "D", "#8b96a3")
+    pf_s = "∞" if profit_factor == 999.0 else (profit_factor if profit_factor is not None else "—")
+    wr_s = f"{win_rate}%" if win_rate is not None else "—"
+    score_s = score if score is not None else "—"
+    title = f"RustDeck Score: {grade or '—'} ({score_s}/100)"
+    desc = f"Win rate {wr_s} · PF {pf_s} · Max drawdown ${max_dd:,.2f}. Track any Hyperliquid wallet free on RustDeck."
+    favicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230a0e13'/><text x='30' y='45' font-family='Arial' font-size='36' font-weight='bold' fill='%2350d2c1' text-anchor='middle'>R</text><path d='M50 6 L38 26 h7 l-6 16 16-22 h-8z' fill='%23f0b90b'/></svg>"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<meta name="robots" content="noindex">
+<meta property="og:title" content="{title}">
+<meta property="og:description" content="{desc}">
+<meta property="og:type" content="website">
+<link rel="icon" href="{favicon}">
+<style>
+body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+       background:#0a0e13; color:#eaecef; font-family:Inter,Arial,sans-serif; }}
+.card {{ background:#0f1419; border:1px solid #1e252e; border-radius:16px; padding:28px 32px;
+        text-align:center; max-width:420px; width:calc(100% - 40px); }}
+.label {{ font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:#5c6670; margin-bottom:14px; }}
+.grade {{ width:72px; height:72px; margin:0 auto 14px; border-radius:16px; border:2px solid; display:flex;
+         align-items:center; justify-content:center; font-size:36px; font-weight:800; }}
+.score {{ font-size:28px; font-weight:800; }}
+.score span {{ color:#5c6670; font-size:14px; font-weight:600; }}
+.stats {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:20px 0 14px; }}
+.stats div {{ background:#0a0e13; border:1px solid #1e252e; border-radius:10px; padding:10px; }}
+.stats b {{ display:block; font-size:16px; }}
+.stats span {{ font-size:10px; color:#5c6670; text-transform:uppercase; letter-spacing:0.08em; }}
+.addr {{ font-family:monospace; font-size:11px; color:#5c6670; margin-bottom:16px; }}
+.cta {{ display:block; background:#50d2c1; color:#0a0e13; font-weight:700; padding:12px;
+       border-radius:10px; text-decoration:none; font-size:13px; }}
+</style></head><body>
+  <div class="card">
+    <div class="grade" style="color:{color}; border-color:{color}">{grade or '—'}</div>
+    <div class="score">{score_s} <span>/ 100</span></div>
+    <div class="label" style="margin-top:8px">RustDeck Score</div>
+    <div class="stats">
+      <div><b>{wr_s}</b><span>Win rate</span></div>
+      <div><b>{pf_s}</b><span>Profit factor</span></div>
+      <div><b>${max_dd:,.2f}</b><span>Max drawdown</span></div>
+      <div><b>${account_value:,.2f}</b><span>Account value</span></div>
+    </div>
+    <div class="addr">{address[:10]}…{address[-6:]}</div>
+    <a class="cta" href="https://rustdeck.app">Check any wallet on RustDeck →</a>
+  </div>
+</body></html>"""
+    return HTMLResponse(html)
 
 # ===== API: привязка Telegram =====
 @app.post("/api/tg/link/start")
