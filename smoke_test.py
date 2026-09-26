@@ -58,6 +58,54 @@ try:
     assert abs(calc["risk_amount"] - 50) < 0.01
     log("CALC OK — математика не изменилась")
 
+    # ===== Алерты «ордер снят»: направление + снятые вместе TP/SL =====
+    # Формат перенесён с основного бота владельца (был русский, стал английский):
+    # в сообщении есть Long/Short, цена, объём в монете и USD, а тейк/стоп,
+    # ушедшие в том же цикле, перечисляются блоком «Removed together».
+    try:
+        import bot as _bot_fmt
+        _main_o = {"oid": 86, "coin": "LTC", "side": "B", "side_label": "Long", "px": 62.0,
+                   "sz": 3.3, "notional": 204.6, "type": "Limit", "is_tp": False, "is_sl": False}
+        _tp = {"oid": 87, "coin": "LTC", "side": "A", "side_label": "Short", "px": 77.0,
+               "sz": 3.3, "notional": 254.1, "type": "Take Profit", "is_tp": True, "is_sl": False}
+        _sl = {"oid": 88, "coin": "LTC", "side": "A", "side_label": "Short", "px": 60.0,
+               "sz": 3.3, "notional": 199.6, "type": "Stop Loss", "is_tp": False, "is_sl": True}
+        msg = _bot_fmt._order_removed_text(_main_o, [_tp, _sl])
+        for must in ["ORDER REMOVED", "#86", "*LTC · LONG*", "$62", "3.3 LTC", "$204.60",
+                     "Removed together:", "🎯 Take Profit — $77", "🛑 Stop Loss — $60"]:
+            assert must in msg, f"в сообщении «ордер снят» нет {must!r}:\n{msg}"
+        solo = _bot_fmt._order_removed_text(_main_o, [])
+        assert "Removed together" not in solo, "блок TP/SL не должен появляться без них"
+        only_exits = _bot_fmt._order_removed_text(_tp, [_sl])
+        assert "*LTC · SHORT*" in only_exits and "Stop Loss" in only_exits, "нет направления/стопа"
+        log("ORDER ALERT OK: «ордер снят» — LONG/SHORT + объём + блок Removed together (TP/SL)")
+    except AssertionError as e:
+        fails += 1
+        log("ORDER ALERT FAIL:", str(e))
+    except Exception as e:
+        log("ORDER ALERT WARN:", repr(e))
+
+    # Классификация ордеров (main._classify_order): строки HL и фолбэк по цене
+    try:
+        import main as _main_oc
+        assert _main_oc._classify_order({"orderType": "Take Profit Market", "isTrigger": True,
+                                        "triggerPx": "77", "side": "A"}, 70.0)[1] is True
+        assert _main_oc._classify_order({"orderType": "Stop Market", "isTrigger": True,
+                                        "triggerPx": "60", "side": "A"}, 70.0)[2] is True
+        assert _main_oc._classify_order({"orderType": "Limit", "isTrigger": False,
+                                        "limitPx": "62", "side": "B"}, 70.0)[0] == "Limit"
+        # без подсказки в orderType: выше рынка + продажа = Take Profit, ниже = Stop Loss
+        assert _main_oc._classify_order({"orderType": "Trigger", "isTrigger": True,
+                                        "triggerPx": "77", "side": "A"}, 70.0)[1] is True
+        assert _main_oc._classify_order({"orderType": "Trigger", "isTrigger": True,
+                                        "triggerPx": "60", "side": "A"}, 70.0)[2] is True
+        log("ORDER KIND OK: Take Profit / Stop Loss / Limit распознаются верно")
+    except AssertionError as e:
+        fails += 1
+        log("ORDER KIND FAIL:", str(e))
+    except Exception as e:
+        log("ORDER KIND WARN:", repr(e))
+
     try:
         status, body = get("/api/prices", timeout=15)
         prices = json.loads(body)
@@ -389,7 +437,8 @@ try:
                  "authGoogleBtn", "convCoin", "convCoinList", "convQuick", "conv-chip",
                  "calcCopyBtn", "calcHlBtn", "tgAlertStatus",
                  "About RustDeck", "google-site-verification", "application/ld+json", "FAQPage",
-                 'rel="canonical"', "og:site_name", "</html>"]:
+                 'rel="canonical"', "og:site_name",
+                 "orderRemovedText", "orderRemovedFeed", "Removed together", "ev.feed", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Position Calculator" in hub, "на хабе должен быть калькулятор позиций"
     assert "calcChart" in hub, "на хабе нет графика калькулятора"
@@ -420,6 +469,12 @@ try:
         assert "max_drawdown_usd" in w["stats"], "нет max_drawdown_usd в stats"
         assert "value_charts" in w, "нет value_charts (график Account Value)"
         assert "perp_chart" in w, "нет perp_chart (вкладка Perps PnL)"
+        # Ордера: для алертов «ордер снят» нужны oid, тип (Take Profit/Stop
+        # Loss/Limit), размер и объём в USD — проверяем форму ответа
+        for o in w.get("open_orders") or []:
+            for key in ("oid", "type", "notional", "remaining", "is_tp", "is_sl", "side_label"):
+                assert key in o, f"в open_orders нет {key}: {o}"
+        log(f"ORDERS SHAPE OK: {len(w.get('open_orders') or [])} ордеров с oid/типом/объёмом в USD")
     except urllib.error.HTTPError as e:
         log(f"WALLET API: {e.code} (HL может быть недоступен локально)")
     except Exception as e:

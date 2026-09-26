@@ -309,6 +309,17 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   /admin=404 для гостя, SEO robots/sitemap, security-заголовки, подписанные
   сессии (подделка cookie отклоняется), санитайз имени, рейт-лимитер, скан секретов.
 
+- Ордера в алертах (сайт + бот): «ORDER REMOVED — #86» с направлением
+  (LTC · LONG 🟢 / SHORT 🔴), ценой, размером в монете и USD, а если в том же
+  цикле снялись тейк/стоп — блок «Removed together:» (🎯 Take Profit / 🛑 Stop Loss).
+  Формат перенесён с основного бота владельца (был русский — стал английский).
+  Тип ордера определяет _classify_order/_order_kind: сначала строка orderType
+  HL («Take Profit Market», «Stop Market»), иначе триггер сравнивается с ценой
+  рынка (выше рынка для лонга — тейк, ниже — стоп). В /api/wallet open_orders
+  теперь отдают oid, remaining, notional, is_tp/is_sl. У бота и сайта ордера
+  сравниваются по oid — частичное исполнение больше не даёт ложных
+  «сняли + поставили заново». Тост на сайте многострочный (лента — одной строкой).
+
 ## КАК НАСТРОИТЬ GOOGLE SIGN-IN (5 минут)
 1. console.cloud.google.com → New Project (rustdeck) → APIs & Services → OAuth consent
    screen: External, название RustDeck, support email; Scopes: только

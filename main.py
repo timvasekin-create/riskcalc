@@ -401,6 +401,30 @@ def _side_label(side) -> str:
     return side or "—"
 
 
+def _classify_order(o: dict, mark_px: float = 0.0):
+    """Тип ордера для алертов: (kind, is_tp, is_sl).
+    HL отдаёт orderType ('Take Profit Market', 'Stop Limit', …) — этого обычно
+    хватает. Если строка без подсказки, сравниваем триггер с ценой: выше рынка
+    для лонга это тейк, ниже — стоп (и наоборот для шорта)."""
+    t = (o.get("orderType") or "").lower()
+    if "take profit" in t or t.startswith("tp"):
+        return "Take Profit", True, False
+    if "stop" in t or t.startswith("sl"):
+        return "Stop Loss", False, True
+    if not o.get("isTrigger"):
+        return "Limit", False, False
+    try:
+        trg = float(o.get("triggerPx") or 0)
+    except (TypeError, ValueError):
+        trg = 0.0
+    if trg <= 0 or mark_px <= 0:
+        return "Trigger", False, False
+    above = trg >= mark_px
+    # A = продажа (закрывает лонг), B = покупка (закрывает шорт)
+    is_tp = above if (o.get("side") or "").upper() == "A" else not above
+    return ("Take Profit", True, False) if is_tp else ("Stop Loss", False, True)
+
+
 def _rustdeck_score(n_closed, win_rate, profit_factor, avg_win, avg_loss, base_value, max_dd):
     """RustDeck Score 0-100 и грейд S/A/B/C/D.
     win rate 30 + profit factor 25 + avg win/loss 20 + просадка 25."""
@@ -509,17 +533,29 @@ async def api_wallet(address: str, request: Request):
     avg_win = round(gross_win / len(wins_list), 2) if wins_list else None
     avg_loss = round(sum(losses_list) / len(losses_list), 2) if losses_list else None
 
-    # Открытые ордера (лимитки, TP/SL, стопы)
+    # Открытые ордера (лимитки, TP/SL, стопы).
+    # Отдаём всё, что нужно для алертов «ордер снят»: номер (oid), тип
+    # (Take Profit / Stop Loss / Limit), цену, размер в монете и в USD.
+    mark_by_coin = {p["coin"]: p.get("mark") or 0 for p in positions}
     open_orders = []
     for o in orders or []:
         try:
+            price = float(o.get("limitPx") or o.get("triggerPx") or 0)
+            remaining = float(o.get("sz") or 0)
+            kind, is_tp, is_sl = _classify_order(o, mark_by_coin.get(o.get("coin"), 0.0))
             open_orders.append({
+                "oid": o.get("oid"),
                 "coin": o.get("coin"),
                 "side": o.get("side"),
                 "side_label": _side_label(o.get("side")),
                 "size": float(o.get("origSz") or o.get("sz") or 0),
-                "type": o.get("orderType") or ("Trigger" if o.get("isTrigger") else "Limit"),
-                "price": float(o.get("limitPx") or o.get("triggerPx") or 0),
+                "remaining": remaining,
+                "notional": round(remaining * price, 2),
+                "type": kind,
+                "is_tp": is_tp,
+                "is_sl": is_sl,
+                "price": price,
+                "trigger_px": float(o.get("triggerPx") or 0),
                 "is_trigger": bool(o.get("isTrigger")),
                 "reduce_only": bool(o.get("reduceOnly")),
                 "time": o.get("timestamp"),

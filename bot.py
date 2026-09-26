@@ -161,6 +161,63 @@ def _side_label(side):
     return side or "—"
 
 
+def _order_kind(o, mark_px=0.0):
+    """Тип ордера: (kind, is_tp, is_sl) — как в main.py, для алертов бота.
+    Сначала строка orderType ('Take Profit Market', 'Stop Limit', …), иначе
+    сравниваем триггер с рынком: выше рынка для лонга это тейк, ниже — стоп."""
+    t = (o.get("orderType") or "").lower()
+    if "take profit" in t or t.startswith("tp"):
+        return "Take Profit", True, False
+    if "stop" in t or t.startswith("sl"):
+        return "Stop Loss", False, True
+    if not o.get("isTrigger"):
+        return "Limit", False, False
+    try:
+        trg = float(o.get("triggerPx") or 0)
+    except (TypeError, ValueError):
+        trg = 0.0
+    if trg <= 0 or mark_px <= 0:
+        return "Trigger", False, False
+    above = trg >= mark_px
+    # A = продажа (закрывает лонг), B = покупка (закрывает шорт)
+    is_tp = above if (o.get("side") or "").upper() == "A" else not above
+    return ("Take Profit", True, False) if is_tp else ("Stop Loss", False, True)
+
+
+def _order_line(o):
+    """Строка ордера: 'Take Profit — $77 · 3.3 LTC ($254.10)'."""
+    kind = o.get("type") or "Order"
+    coin = o.get("coin") or ""
+    amt = o.get("sz") or 0
+    usd = f"(${o['notional']:,.2f})" if o.get("notional") else ""
+    tail = f"{_fmt_small(amt)} {coin} {usd}".strip()
+    return f"{kind} — ${_fmt_small(o.get('px'))}" + (f" · {tail}" if tail else "")
+
+
+def _order_removed_text(main, others=None):
+    """Сообщение «ордер снят»: направление (Long/Short), цена и объём, а если
+    в том же цикле снялись тейк/стоп — они перечисляются блоком.
+    Формат перенесён с основного бота владельца (был русский — стал английский)."""
+    others = others or []
+    coin = main.get("coin") or ""
+    side = (main.get("side_label") or main.get("side") or "").upper()
+    emoji = "🟢" if side == "LONG" else ("🔴" if side == "SHORT" else "")
+    head = "🗑 *ORDER REMOVED*" + (f" — #{main['oid']}" if main.get("oid") else "")
+    lines = [head, f"*{coin} · {side}* {emoji}".strip()]
+    lines.append(f"• {main.get('type') or 'Order'}: ${_fmt_small(main.get('px'))}")
+    amt = main.get("sz") or 0
+    usd = f" (${main['notional']:,.2f})" if main.get("notional") else ""
+    if amt:
+        lines.append(f"• Size: {_fmt_small(amt)} {coin}{usd}")
+    if others:
+        lines.append("")
+        lines.append("*Removed together:*")
+        for x in others:
+            mark = "🎯" if x.get("is_tp") else ("🛑" if x.get("is_sl") else "•")
+            lines.append(f"{mark} {_order_line(x)}")
+    return "\n".join(lines)
+
+
 def get_bot_username():
     """Юзернейм бота (кэш на 10 минут) — нужен сайту для deep-link."""
     now = time.time()
@@ -266,17 +323,40 @@ def _wallet_snapshot(addr):
     # Свежие филлы кладём в снимок: цикл слежения не делает повторный запрос
     # (меньше вызовов HL → быстрее реакция и меньше шансов на rate limit)
     recent_fills = sorted(fills or [], key=lambda x: x.get("time") or 0, reverse=True)[:20]
-    # Открытые ордера (лимитки, TP/SL) — для уведомлений о появлении/снятии
+    # Открытые ордера (лимитки, TP/SL) — для уведомлений о появлении/снятии.
+    # Ключ — oid (номер ордера): частичное исполнение меняет sz и раньше давало
+    # ложные «сняли + поставили». В алерт кладём тип ордера, размер и объём в USD.
     orders = {}
     try:
         for o in _hl_post({"type": "frontendOpenOrders", "user": addr}) or []:
-            k = f"{o.get('coin')}|{o.get('side')}|{o.get('limitPx') or o.get('triggerPx')}|{o.get('sz')}"
-            orders[k] = {
+            try:
+                price = float(o.get("limitPx") or o.get("triggerPx") or 0)
+                sz = float(o.get("sz") or 0)
+            except (TypeError, ValueError):
+                continue
+            mark = 0.0
+            for ap in state.get("assetPositions") or []:
+                p = ap.get("position") or {}
+                if p.get("coin") == o.get("coin"):
+                    try:
+                        mark = float(p.get("markPx") or 0)
+                    except (TypeError, ValueError):
+                        mark = 0.0
+                    break
+            kind, is_tp, is_sl = _order_kind(o, mark)
+            key = (str(o.get("oid")) if o.get("oid") is not None
+                   else f"{o.get('coin')}|{o.get('side')}|{price}|{sz}")
+            orders[key] = {
+                "oid": o.get("oid"),
                 "coin": o.get("coin"),
                 "side": o.get("side"),
                 "side_label": _side_label(o.get("side")),
-                "px": float(o.get("limitPx") or o.get("triggerPx") or 0),
-                "sz": float(o.get("sz") or 0),
+                "px": price,
+                "sz": sz,
+                "notional": round(sz * price, 2),
+                "type": kind,
+                "is_tp": is_tp,
+                "is_sl": is_sl,
                 "is_trigger": bool(o.get("isTrigger")),
             }
     except Exception:
@@ -553,7 +633,7 @@ def _subs_loop():
 
 
 def _watch_loop():
-    """Фоновый цикл: раз в 60с опрашивает отслеживаемые кошельки подписчиков."""
+    """Фоновый цикл: раз в WATCH_INTERVAL секунд опрашивает кошельки подписчиков."""
     cache = {}  # addr -> snapshot
     while True:
         try:
@@ -616,19 +696,33 @@ def _watch_loop():
                     if c not in now_pos and not any("closed" in e or "LIQUIDATION" in e for e in events):
                         events.append(f"🔒 *Position closed:* {c}")
 
-                # Лимитки / TP / SL: появление и снятие ордеров
+                # Лимитки / TP / SL: появление ордеров
                 prev_o, now_o = prev.get("orders", {}), snap.get("orders", {})
                 for k, o in now_o.items():
                     if k in prev_o or any(o["coin"] in e for e in events):
                         continue
-                    kind = "Stop/TP order" if o["is_trigger"] else "Limit order"
                     side_s = o.get("side_label") or o["side"]
-                    events.append(f"🧾 *{kind}:* {o['coin']} {side_s} · {_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}")
+                    kind = o.get("type") or ("Trigger" if o["is_trigger"] else "Limit")
+                    events.append(
+                        f"🧾 *{kind} placed:* {o['coin']} {side_s} · "
+                        f"{_fmt_small(o['sz'])} @ ${_fmt_small(o['px'])}"
+                    )
+
+                # Снятие ордеров: группируем по монете и направлению, чтобы
+                # показать тейк/стоп, ушедшие вместе с ордером в этом же цикле
+                removed = {}
                 for k, o in prev_o.items():
-                    if k in now_o or any(o["coin"] in e for e in events):
+                    if k in now_o:
                         continue
-                    side_s = o.get("side_label") or o["side"]
-                    events.append(f"🗑 *Order removed:* {o['coin']} {side_s} @ ${_fmt_small(o['px'])}")
+                    removed.setdefault((o.get("coin"), o.get("side_label") or o.get("side")), []).append(o)
+                for group in removed.values():
+                    exits = [x for x in group if x.get("is_tp") or x.get("is_sl")]
+                    mains = [x for x in group if not (x.get("is_tp") or x.get("is_sl"))]
+                    if mains:
+                        for m in mains:
+                            events.append(_order_removed_text(m, exits))
+                    else:
+                        events.append(_order_removed_text(group[0], group[1:]))
 
                 for ev in events:
                     for cid in chat_ids:

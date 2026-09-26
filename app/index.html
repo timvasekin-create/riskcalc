@@ -1526,7 +1526,9 @@
             if (!stack) return;
             const div = document.createElement('div');
             div.className = 'toast' + (bad ? ' bad' : '');
-            div.innerHTML = `<b>${esc(title)}</b><br><span>${esc(text)}</span>`;
+            // Многострочные алерты (например «ордер снят» с блоком TP/SL)
+            // показываем как есть: переносы строк → <br>
+            div.innerHTML = `<b>${esc(title)}</b><br><span>${esc(text).replace(/\n/g, '<br>')}</span>`;
             stack.appendChild(div);
             while (stack.children.length > 4) stack.removeChild(stack.firstChild);
             setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity 0.4s'; setTimeout(() => div.remove(), 400); }, 6000);
@@ -1886,7 +1888,8 @@
             div.className = 'alert-feed-item';
             const bad = ev.type === 'liq' || ev.type === 'close_loss';
             const time = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-            div.innerHTML = `<span class="text-hyper-muted font-mono text-[10px] mr-2">${time}</span><span class="${bad ? 'text-hyper-red' : 'text-hyper-teal'} font-semibold">${esc(ev.title)}</span> <span class="text-hyper-muted2">${esc(ev.text)}</span>`;
+            const text = ev.feed || ev.text;   // лента — однострочная версия алерта
+            div.innerHTML = `<span class="text-hyper-muted font-mono text-[10px] mr-2">${time}</span><span class="${bad ? 'text-hyper-red' : 'text-hyper-teal'} font-semibold">${esc(ev.title)}</span> <span class="text-hyper-muted2">${esc(text)}</span>`;
             feed.prepend(div);
             while (feed.children.length > 20) feed.removeChild(feed.lastChild);
         }
@@ -1903,6 +1906,41 @@
             if ('Notification' in window && Notification.permission === 'granted') {
                 try { new Notification('RustDeck — ' + ev.title, { body: ev.text }); } catch(e) {}
             }
+        }
+
+        // ===== Ордера: тексты алертов (тот же формат, что в Telegram-боте) =====
+        // «Ордер снят» показывает направление (Long/Short), цену и объём, а если
+        // в том же цикле ушли тейк/стоп — перечисляет их блоком ниже.
+        function orderAmount(o) {
+            const sz = o.remaining || o.size || 0;
+            const usd = o.notional ? ` ($${fmtUsd(o.notional)})` : '';
+            return sz ? `${fmtPrice(sz)} ${o.coin}${usd}` : '';
+        }
+        function orderShortLine(o) {
+            const amt = orderAmount(o);
+            return `${o.type || 'Order'} — $${fmtPrice(o.price)}` + (amt ? ' · ' + amt : '');
+        }
+        function orderRemovedText(main, others) {
+            const dir = (main.side_label || main.side || '').toUpperCase();
+            const emoji = dir === 'LONG' ? '🟢' : (dir === 'SHORT' ? '🔴' : '');
+            const lines = [
+                `${main.coin} · ${dir} ${emoji}`.trim(),
+                `• ${main.type || 'Order'}: $${fmtPrice(main.price)}`,
+            ];
+            const amt = orderAmount(main);
+            if (amt) lines.push(`• Size: ${amt}`);
+            if (others && others.length) {
+                lines.push('', 'Removed together:');
+                others.forEach(x => lines.push(`${x.is_tp ? '🎯' : (x.is_sl ? '🛑' : '•')} ${orderShortLine(x)}`));
+            }
+            return lines.join('\n');
+        }
+        function orderRemovedFeed(main, others) {
+            const dir = (main.side_label || main.side || '').toUpperCase();
+            const tail = (others && others.length)
+                ? ' · removed together: ' + others.map(orderShortLine).join('; ')
+                : '';
+            return `${main.coin} ${dir} · ${orderShortLine(main)}${tail}`;
         }
 
         // Сравнение состояний: что произошло с момента прошлого опроса
@@ -1950,20 +1988,45 @@
                 }
             });
 
-            // Лимитки / TP / SL: появление и снятие ордеров
+            // Лимитки / TP / SL: появление и снятие ордеров.
+            // Ключ — oid (номер ордера, есть в API): частичное исполнение
+            // больше не выглядит как «ордер сняли и поставили заново».
             const prevOrd = {}, nowOrd = {};
-            (prev.open_orders || []).forEach(o => prevOrd[o.coin + '|' + o.side + '|' + o.price + '|' + o.size] = o);
-            (d.open_orders || []).forEach(o => nowOrd[o.coin + '|' + o.side + '|' + o.price + '|' + o.size] = o);
+            const ordKey = o => (o.oid !== null && o.oid !== undefined)
+                ? 'oid:' + o.oid
+                : `${o.coin}|${o.side}|${o.price}|${o.size}`;
+            (prev.open_orders || []).forEach(o => prevOrd[ordKey(o)] = o);
+            (d.open_orders || []).forEach(o => nowOrd[ordKey(o)] = o);
             Object.keys(nowOrd).forEach(k => {
                 if (prevOrd[k]) return;
                 const o = nowOrd[k];
-                const kind = o.is_trigger ? 'Stop/TP order' : 'Limit order';
-                events.push({ type: 'order', title: '🧾 ' + kind, text: `${o.coin} ${o.side_label || o.side} · ${fmtPrice(o.size)} @ $${fmtPrice(o.price)}` });
+                const kind = o.type || (o.is_trigger ? 'Trigger' : 'Limit');
+                events.push({ type: 'order', title: '🧾 ' + kind + ' placed',
+                              text: `${o.coin} ${o.side_label || o.side} · ${fmtPrice(o.remaining || o.size)} @ $${fmtPrice(o.price)}` });
             });
+            // Снятие: что ушло в этом же цикле по монете и направлению — вместе.
+            // Если с ордером снялись тейк/стоп, прикладываем их блоком.
+            const byGroup = {};
             Object.keys(prevOrd).forEach(k => {
                 if (nowOrd[k]) return;
                 const o = prevOrd[k];
-                events.push({ type: 'order', title: '🗑 Order removed', text: `${o.coin} ${o.side_label || o.side} @ $${fmtPrice(o.price)}` });
+                const gk = o.coin + '|' + (o.side_label || o.side);
+                (byGroup[gk] = byGroup[gk] || []).push(o);
+            });
+            Object.keys(byGroup).forEach(gk => {
+                const group = byGroup[gk];
+                const exits = group.filter(o => o.is_tp || o.is_sl);
+                const mains = group.filter(o => !(o.is_tp || o.is_sl));
+                const pairs = (mains.length ? mains : [group[0]])
+                    .map(m => [m, mains.length ? exits : group.filter(x => x !== m)]);
+                pairs.forEach(([main, others]) => {
+                    events.push({
+                        type: 'order',
+                        title: '🗑 Order removed' + (main.oid !== null && main.oid !== undefined ? ' #' + main.oid : ''),
+                        text: orderRemovedText(main, others),   // тост/уведомление: многострочно
+                        feed: orderRemovedFeed(main, others),   // лента: одной строкой
+                    });
+                });
             });
             return events;
         }
