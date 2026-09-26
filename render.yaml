@@ -23,3 +23,12 @@ services:
       # Токен Telegram-бота задаётся ВРУЧНУЮ в Render Dashboard → Environment
       - key: BOT_TOKEN
         sync: false
+      # Google OAuth: Google Cloud Console → Credentials → OAuth client ID
+      # (Authorized redirect URI: https://rustdeck.app/auth/google/callback)
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Подпись cookie-сессии (любая длинная случайная строка, напр. openssl rand -hex 32)
+      - key: APP_SECRET
+        sync: false

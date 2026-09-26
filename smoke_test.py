@@ -78,6 +78,48 @@ try:
     except Exception as e:
         log("TG start WARN:", repr(e))
 
+    # Google OAuth: без ключей локально — редирект на /?google=unavailable
+    try:
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+        try:
+            urllib.request.build_opener(_NoRedirect()).open(BASE + "/auth/google", timeout=8)
+            fails += 1
+            log("FAIL GOOGLE /auth/google: 200 (ожидаем редирект)")
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location", "")
+            ok = e.code in (301, 302, 303, 307, 308)
+            if not ok:
+                fails += 1
+            log(f"{'OK ' if ok else 'FAIL'} GOOGLE /auth/google: {e.code} → {loc}")
+    except Exception as e:
+        log("GOOGLE WARN:", repr(e))
+
+    # /api/me без cookie — не авторизован (и не должен падать)
+    try:
+        status, body = get("/api/me", timeout=8)
+        mj = json.loads(body)
+        assert status == 200 and mj.get("authenticated") is False, f"/api/me: {status} {body[:120]}"
+        log("ME API OK: /api/me без cookie → authenticated=false")
+    except Exception as e:
+        fails += 1
+        log("ME API FAIL:", repr(e))
+
+    # Мост «сайт → TG»: локально без BOT_TOKEN ждём 503
+    try:
+        req = urllib.request.Request(
+            BASE + "/api/tg/watch",
+            data=json.dumps({"chat_id": 1, "wallet": "0x" + "0" * 40}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            log(f"TG watch bridge: {r.status} (бот включён?)")
+    except urllib.error.HTTPError as e:
+        log(f"TG watch bridge: {e.code} (ожидаемо 503 без токена)" if e.code == 503 else f"TG watch bridge: {e.code} — ПРОВЕРИТЬ")
+    except Exception as e:
+        log("TG watch bridge WARN:", repr(e))
+
     _, sm = get("/sitemap.xml")
     for p in ["/ethereum-risk-calculator", "/liquidation-calculator", "/leverage-calculator", "/solana-risk-calculator"]:
         assert p in sm, f"sitemap не содержит {p}"
@@ -100,7 +142,8 @@ try:
                  "chartBlock", "chartToggles", "pnlChart", "stPF",
                  "scoreBlock", "scoreGrade", "followTgBtn", "startTgLink", "tgDeepLink",
                  "chartTabs", "chartTip", "authModal", "authTgBtn", "evOrders", "side-rail",
-                 "calcTicker", "calcChart", "loadCalcTicker", "setWalletBtn", "</html>"]:
+                 "calcTicker", "calcChart", "loadCalcTicker", "setWalletBtn",
+                 "authGoogleBtn", "convCoin", "calcCopyBtn", "calcHlBtn", "tgAlertStatus", "</html>"]:
         assert must in hub, f"Хаб не содержит {must}"
     assert "Position Calculator" in hub, "на хабе должен быть калькулятор позиций"
     assert "calcChart" in hub, "на хабе нет графика калькулятора"
@@ -221,6 +264,12 @@ try:
     try:
         import bot as _bot
         _bot.init_db()
+        # Чистим следы прошлых прогонов — тесты должны быть герметичными
+        _clean = _bot._db()
+        for _tbl in ("subscribers", "price_alerts"):
+            _clean.execute(f"DELETE FROM {_tbl} WHERE chat_id IN (777000, 888001, 888002)")
+        _clean.commit()
+        _clean.close()
         c1 = _bot.create_link_code()
         _bot._try_link(777000, 'tester', c1)  # send_message молча упадёт без токена — ок
         conn = _bot._db()
@@ -375,6 +424,24 @@ try:
         conn.close()
         assert cnt2 == 0, "/delalert не удалил алерт"
         log("ALERT OK: /delalert 1 удаляет алерт")
+
+        # Мост «сайт → TG»: add_watch добавляет кошелёк и не дублирует его
+        # (локально без BOT_TOKEN подставляем фиктивный — проверяем БД-логику)
+        _saved_token = _bot.BOT_TOKEN
+        _bot.BOT_TOKEN = _saved_token or "smoke-test-token"
+        try:
+            w1 = _bot.add_watch(888001, "0x" + "2" * 40)
+            assert w1.get("ok") and w1.get("count") == 2, f"add_watch не сработал: {w1}"
+            w2 = _bot.add_watch(888001, "0x" + "2" * 40)
+            assert w2.get("already") is True, f"повторный add_watch должен быть already: {w2}"
+            w3 = _bot.add_watch(888001, "notanaddress")
+            assert w3.get("error") == "invalid_address", f"кривой адрес не отклонён: {w3}"
+            sub_email = _bot.subscriber_by_email("tester@example.com")
+            assert sub_email and sub_email["chat_id"] in (888001, 888002), f"subscriber_by_email: {sub_email}"
+            assert sub_email["username"] in ("tester", "tester3"), f"username не проброшен: {sub_email}"
+            log("BRIDGE OK: сайт→TG (add_watch + subscriber_by_email)")
+        finally:
+            _bot.BOT_TOKEN = _saved_token
 
         conn = _bot._db()
         conn.execute("DELETE FROM subscribers WHERE chat_id IN (888001, 888002)")

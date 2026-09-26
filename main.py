@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 import os
@@ -926,6 +926,8 @@ _threading.Thread(target=_whale_refresh_loop, daemon=True, name="rustdeck-whales
 # ===== API: свечи и активы (для встроенного калькулятора позиций) =====
 ASSET_LIST_CACHE = {"ts": 0.0, "names": []}
 CANDLE_CACHE = {}
+CANDLE_TTL = 5    # секунд: график калькулятора обновляется каждые 5с
+CANDLE_MAX = 16   # максимум монет в кэше — экономия RAM (вытесняем самую старую)
 
 def _asset_names():
     """Названия перпов HL (кэш 10 мин)."""
@@ -956,7 +958,7 @@ async def api_candles(coin: str, interval: str = "1h", hours: int = 72):
     key = f"{coin}|{interval}|{hours}"
     now = _time.time()
     cached = CANDLE_CACHE.get(key)
-    if cached and now - cached["ts"] < 30:
+    if cached and now - cached["ts"] < CANDLE_TTL:
         return cached["data"]
     try:
         raw = _hl_info({
@@ -975,9 +977,11 @@ async def api_candles(coin: str, interval: str = "1h", hours: int = 72):
         except (TypeError, ValueError, KeyError):
             continue
     data = {"coin": coin, "interval": interval, "candles": candles, "updated": int(now)}
-    if len(CANDLE_CACHE) > 60:
-        CANDLE_CACHE.clear()
     CANDLE_CACHE[key] = {"data": data, "ts": now}
+    # Вытесняем только самую старую запись (а не весь кэш) — плавная память
+    if len(CANDLE_CACHE) > CANDLE_MAX:
+        oldest = min(CANDLE_CACHE, key=lambda k: CANDLE_CACHE[k]["ts"])
+        CANDLE_CACHE.pop(oldest, None)
     return data
 
 @app.get("/score/{address}", response_class=HTMLResponse)
@@ -1112,3 +1116,163 @@ async def tg_link_status(code: str):
     if not BOT_ENABLED:
         return JSONResponse({"error": "bot_disabled"}, status_code=503)
     return tg_bot.link_code_status(code)
+
+
+# ===== API: мост «сайт → Telegram» =====
+# Кнопка Live Alerts на хабе добавляет кошелёк в список слежения бота,
+# чтобы уведомления приходили и в Telegram (если аккаунт привязан).
+class TgWatchInput(BaseModel):
+    chat_id: int
+    wallet: str
+
+@app.post("/api/tg/watch")
+async def tg_watch(data: TgWatchInput):
+    if not BOT_ENABLED:
+        return JSONResponse({"error": "bot_disabled"}, status_code=503)
+    return tg_bot.add_watch(data.chat_id, data.wallet)
+
+
+# ===== Авторизация через Google (OAuth 2.0 Authorization Code, stdlib) =====
+# Ключи задаются в Render → Environment: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+# APP_SECRET (любая длинная строка — подпись cookie-сессии).
+import base64 as _b64
+import hashlib as _hashlib
+import hmac as _hmac
+import secrets as _secrets
+from urllib.parse import urlencode as _urlencode
+
+APP_SECRET = os.environ.get("APP_SECRET", "").strip() or _secrets.token_hex(32)
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+SESSION_COOKIE = "rd_session"
+SESSION_TTL = 30 * 86400      # 30 дней
+OAUTH_STATE_COOKIE = "rd_state"
+
+def google_ready() -> bool:
+    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+def _sign(raw: str) -> str:
+    return _hmac.new(APP_SECRET.encode(), raw.encode(), _hashlib.sha256).hexdigest()
+
+def make_session(email: str, name: str = "") -> str:
+    """Подписанный токен сессии: base64(email|name|ts|hmac)."""
+    payload = f"{(email or '').strip().lower()}|{(name or '').replace('|', ' ')}|{int(_time.time())}"
+    body = f"{payload}|{_sign(payload)}"
+    return _b64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+
+def read_session(token: str):
+    """Проверка подписи и срока → (email, name) или None."""
+    if not token:
+        return None
+    try:
+        raw = _b64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
+    except Exception:
+        return None
+    parts = raw.split("|")
+    if len(parts) < 4:
+        return None
+    payload = "|".join(parts[:-1])
+    if not _hmac.compare_digest(parts[-1], _sign(payload)):
+        return None
+    try:
+        if _time.time() - float(parts[2]) > SESSION_TTL:
+            return None
+    except ValueError:
+        return None
+    return parts[0], parts[1]
+
+@app.get("/auth/google")
+async def auth_google(request: Request):
+    """Редирект на Google. Без ключей — возвращаемся на сайт с подсказкой."""
+    if not google_ready():
+        return RedirectResponse(url="/?google=unavailable", status_code=302)
+    base = str(request.base_url).rstrip("/")
+    state = _secrets.token_urlsafe(16)
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": f"{base}/auth/google/callback",
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "prompt": "select_account",
+        "access_type": "online",
+    }
+    resp = RedirectResponse(url="https://accounts.google.com/o/oauth2/v2/auth?" + _urlencode(params), status_code=302)
+    resp.set_cookie(OAUTH_STATE_COOKIE, f"{state}.{_sign(state)}", max_age=600, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/auth/google/callback")
+async def auth_google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    """Google вернул код — меняем на токен, достаём email и ставим cookie-сессию."""
+    if error or not code:
+        return RedirectResponse("/?google=failed", status_code=302)
+    cookie = request.cookies.get(OAUTH_STATE_COOKIE, "")
+    want_state, _, sig = cookie.partition(".")
+    if not want_state or want_state != state or not _hmac.compare_digest(sig, _sign(state)):
+        return RedirectResponse("/?google=failed", status_code=302)
+    if not google_ready():
+        return RedirectResponse("/?google=unavailable", status_code=302)
+
+    base = str(request.base_url).rstrip("/")
+    try:
+        form = _urlencode({
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": f"{base}/auth/google/callback",
+            "grant_type": "authorization_code",
+        }).encode()
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token", data=form,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            tok = _json.loads(r.read().decode("utf-8"))
+        id_token = tok.get("id_token") or ""
+        payload_b64 = id_token.split(".")[1] if id_token.count(".") == 2 else ""
+        claims = {}
+        if payload_b64:
+            claims = _json.loads(_b64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)).decode())
+        email = (claims.get("email") or "").strip().lower()
+        name = (claims.get("name") or claims.get("given_name") or "").strip()
+        if not email:
+            raise ValueError("no email in id_token")
+    except Exception:
+        return RedirectResponse("/?google=failed", status_code=302)
+
+    resp = RedirectResponse("/?google=ok", status_code=302)
+    resp.set_cookie(
+        SESSION_COOKIE, make_session(email, name),
+        max_age=SESSION_TTL, httponly=True, samesite="lax",
+        secure=(request.url.scheme == "https"),
+    )
+    resp.delete_cookie(OAUTH_STATE_COOKIE)
+    return resp
+
+@app.get("/api/me")
+async def api_me(request: Request):
+    """Кто вошёл (Google-cookie) + привязан ли Telegram — для профиля на хабе."""
+    sess = read_session(request.cookies.get(SESSION_COOKIE, ""))
+    if not sess:
+        return {"authenticated": False}
+    email, name = sess
+    tg = None
+    if BOT_ENABLED:
+        try:
+            tg = tg_bot.subscriber_by_email(email)
+        except Exception:
+            tg = None
+    return {
+        "authenticated": True,
+        "email": email,
+        "name": name or email.split("@")[0],
+        "tg": tg,   # {"chat_id", "username", "tier", "expires_at"} или None
+    }
+
+@app.post("/api/logout")
+async def api_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+

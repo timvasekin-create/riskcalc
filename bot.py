@@ -106,14 +106,23 @@ def _tg(method, payload=None, timeout=30):
 
 
 def send_message(chat_id, text, reply_markup=None):
-    """Отправка сообщения (не бросает исключений — бот не должен ронять сайт)."""
+    """Отправка сообщения (не бросает исключений — бот не должен ронять сайт).
+    Если Telegram отклонил Markdown-разметку — повторяем без неё, чтобы
+    уведомление всё равно дошло (иначе ошибка молча съедала сообщение)."""
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
         _tg("sendMessage", payload)
+        return True
     except Exception:
         pass
+    payload.pop("parse_mode", None)
+    try:
+        _tg("sendMessage", payload)
+        return True
+    except Exception:
+        return False
 
 
 def _fmt_small(v):
@@ -257,6 +266,68 @@ def _parse_watched(raw):
         if re.fullmatch(r"0x[0-9a-f]{40}", a) and a not in out:
             out.append(a)
     return out
+
+
+def add_watch(chat_id, addr):
+    """Мост «сайт → Telegram»: хаб добавляет кошелёк в слежение бота.
+
+    Возвращает {ok, count, limit, already} или {ok: False, error: ...}."""
+    a = (addr or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{40}", a):
+        a = "0x" + a
+    if not re.fullmatch(r"0x[0-9a-f]{40}", a):
+        return {"ok": False, "error": "invalid_address"}
+    if not BOT_TOKEN:
+        return {"ok": False, "error": "bot_disabled"}
+    conn = _db()
+    sub = conn.execute(
+        "SELECT watched_wallet FROM subscribers WHERE chat_id=?", (chat_id,)
+    ).fetchone()
+    if not sub:
+        conn.close()
+        return {"ok": False, "error": "not_linked"}
+    current = _parse_watched(sub["watched_wallet"])
+    if a in current:
+        conn.close()
+        return {"ok": True, "already": True, "count": len(current), "limit": WATCH_LIMIT}
+    if len(current) >= WATCH_LIMIT:
+        conn.close()
+        return {"ok": False, "error": "limit_reached", "limit": WATCH_LIMIT}
+    current.append(a)
+    conn.execute(
+        "UPDATE subscribers SET watched_wallet=? WHERE chat_id=?",
+        (",".join(current), chat_id),
+    )
+    conn.commit()
+    conn.close()
+    send_message(
+        chat_id,
+        f"👀 *Website:* now watching `{a[:10]}…{a[-6:]}` in Telegram too ({len(current)}/{WATCH_LIMIT}).\n"
+        "Alerts arrive here automatically.",
+    )
+    return {"ok": True, "count": len(current), "limit": WATCH_LIMIT}
+
+
+def subscriber_by_email(email):
+    """Аккаунт сайта (email) → привязанный Telegram (для /api/me на хабе)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    conn = _db()
+    row = conn.execute(
+        "SELECT chat_id, username, tier, expires_at FROM subscribers "
+        "WHERE email=? ORDER BY linked_at DESC LIMIT 1",
+        (email,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "chat_id": row["chat_id"],
+        "username": row["username"],
+        "tier": row["tier"],
+        "expires_at": row["expires_at"],
+    }
 
 
 def _watch_loop():

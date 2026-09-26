@@ -32,8 +32,10 @@
         ::-webkit-scrollbar-thumb { background:#2a323d; border-radius:3px; }
         .hl-input { width:100%; background:#0a0e13; border:1px solid #1e252e; border-radius:8px; padding:12px 14px; color:#eaecef; font-size:14px; font-family:monospace; transition:border-color 0.15s, box-shadow 0.15s; }
         .hl-input:focus { outline:none; border-color:#50d2c1; box-shadow:0 0 0 3px rgba(80,210,193,0.1); }
+        .hl-input.auto-filled { border-color:#f0b90b; box-shadow:0 0 0 3px rgba(240,185,11,0.08); }
         .hl-input::placeholder { color:#3a4450; }
         .stat-card { background:#0a0e13; border:1px solid #1e252e; border-radius:10px; padding:16px; }
+        .stat-card-sm { background:#0a0e13; border:1px solid #1e252e; border-radius:9px; padding:9px 11px; }
         .data-table { width:100%; border-collapse:collapse; font-size:12px; }
         .data-table th { text-align:left; padding:8px 10px; color:#5c6670; font-size:10px; text-transform:uppercase; letter-spacing:0.1em; border-bottom:1px solid #1e252e; font-weight:600; }
         .data-table td { padding:9px 10px; border-bottom:1px solid #151a20; color:#eaecef; }
@@ -62,6 +64,8 @@
         .dir-btn, .lev-preset, .unit-btn { background:#0a0e13; border:1px solid #1e252e; color:#8b96a3; font-size:11px; font-weight:700; padding:6px 4px; border-radius:6px; cursor:pointer; transition:all 0.15s; }
         .dir-btn:hover, .lev-preset:hover, .unit-btn:hover { color:#eaecef; }
         .dir-btn.active, .lev-preset.active, .unit-btn.active { background:rgba(80,210,193,0.12); border-color:#50d2c1; color:#50d2c1; }
+        .dir-btn.active-short { background:rgba(246,70,93,0.12); border-color:#f6465d; color:#f6465d; }
+        .dir-btn.active-short:hover { color:#f6465d; }
         .lev-slider { -webkit-appearance:none; appearance:none; height:6px; background:#1e252e; border-radius:3px; outline:none; }
         .lev-slider::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%; background:#50d2c1; cursor:pointer; }
         .lev-slider::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#50d2c1; cursor:pointer; border:none; }
@@ -71,13 +75,13 @@
         .toast b { color:#ffffff; }
         .toast span { color:#8b96a3; }
         @keyframes toastIn { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:none; } }
-        section { scroll-margin-top:20px; }
+        section { scroll-margin-top:92px; }
     </style>
 </head>
 <body class="bg-hyper-bg text-hyper-text min-h-screen flex flex-col">
 
     <!-- Хедер -->
-    <header class="border-b border-hyper-border py-4 px-4 md:px-8 flex justify-between items-center">
+    <header class="sticky top-0 z-40 border-b border-hyper-border bg-hyper-bg/95 backdrop-blur py-3 px-4 md:px-8 flex justify-between items-center">
         <div class="flex items-center space-x-2">
             <svg class="w-6 h-6 text-hyper-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -88,6 +92,7 @@
             <a href="#tracker" class="hover:text-hyper-teal transition-colors">Wallet Tracker</a>
             <a href="#whales" class="hover:text-hyper-teal transition-colors">Whales</a>
             <a href="#markets" class="hover:text-hyper-teal transition-colors">Markets</a>
+            <a href="#converter" class="hover:text-hyper-teal transition-colors">Converter</a>
             <a href="#leaderboard" class="hover:text-hyper-teal transition-colors">Leaderboard</a>
             <a href="https://t.me/RustDeckcryptobot" target="_blank" rel="noopener" class="hover:text-hyper-teal transition-colors">Telegram</a>
         </nav>
@@ -171,6 +176,7 @@
                             <div>
                                 <div class="text-[12px] font-semibold text-white">🔔 Live Alerts <span id="alertsPerm" class="hidden text-[9px] font-mono px-1.5 py-0.5 rounded bg-hyper-border text-hyper-muted2 ml-1"></span></div>
                                 <div class="text-[10px] text-hyper-muted">Browser notifications + sound for the tracked wallet</div>
+                                <div id="tgAlertStatus" class="text-[10px] text-hyper-muted2 mt-1"></div>
                             </div>
                         </div>
                         <button type="button" id="alertsGear" class="text-[11px] text-hyper-muted2 hover:text-hyper-teal transition-colors">⚙ Configure</button>
@@ -320,9 +326,9 @@
                         <span id="calcLivePrice" class="text-[12px] font-mono text-hyper-teal">—</span>
                     </div>
                 </div>
-                <div class="grid lg:grid-cols-2 gap-6">
-                    <div class="space-y-3">
-                        <div class="grid grid-cols-2 gap-3">
+                <div class="grid lg:grid-cols-2 gap-4">
+                    <div class="space-y-2.5">
+                        <div class="grid grid-cols-2 gap-2.5">
                             <div>
                                 <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Capital (own margin) $</label>
                                 <input id="calcCapital" type="number" class="hl-input mt-1" placeholder="1000" step="any">
@@ -362,7 +368,7 @@
                                 <input id="calcTake" type="number" class="hl-input mt-1" step="any">
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-3">
+                        <div class="grid grid-cols-2 gap-2.5">
                             <div>
                                 <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Risk per trade</label>
                                 <div class="flex gap-1 mt-1">
@@ -383,24 +389,27 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-                        <button id="calcBtn" class="w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-3 rounded-lg transition-all text-[13px] uppercase tracking-wider">Calculate Position</button>
-                        <div id="calcNote" class="text-[10px] text-hyper-muted leading-relaxed">Leverage is always required. Fill the fields you know — the rest is solved automatically (entry defaults to the live price).</div>
+                        <button id="calcBtn" class="w-full bg-hyper-teal hover:bg-hyper-tealDim text-hyper-bg font-bold py-2 rounded-lg transition-all text-[12px] uppercase tracking-wider">Calculate Position</button>
+                        <div id="calcNote" class="text-[10px] text-hyper-muted leading-relaxed">Leverage is required. Amber fields were auto-filled — check them before trading.</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="calcCopyBtn" type="button" class="text-[11px] font-semibold py-2 rounded-md border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">📋 Copy summary</button>
+                            <a id="calcHlBtn" href="https://app.hyperliquid.xyz/trade/BTC" target="_blank" rel="noopener" class="text-[11px] font-semibold py-2 rounded-md border border-hyper-teal/40 text-hyper-teal text-center hover:bg-hyper-teal/10 transition-colors">Trade on HL →</a>
+                        </div>
                     </div>
                     <div>
-                        <div class="grid grid-cols-2 gap-2 mb-4">
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Position Size</div><div id="crSize" class="text-lg font-bold font-mono text-white">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Quantity</div><div id="crQty" class="text-lg font-bold font-mono text-white">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Margin Used</div><div id="crMargin" class="text-lg font-bold font-mono text-white">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Risk</div><div id="crRisk" class="text-lg font-bold font-mono text-hyper-yellow">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Liquidation</div><div id="crLiq" class="text-lg font-bold font-mono text-hyper-red">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">R : R</div><div id="crRR" class="text-lg font-bold font-mono text-white">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Profit at TP</div><div id="crTP" class="text-lg font-bold font-mono text-hyper-teal">—</div></div>
-                            <div class="stat-card"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Loss at SL</div><div id="crSL" class="text-lg font-bold font-mono text-hyper-red">—</div></div>
+                        <div class="grid grid-cols-2 gap-2 mb-1">
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Position Size</div><div id="crSize" class="text-base font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Quantity</div><div id="crQty" class="text-base font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Margin Used</div><div id="crMargin" class="text-base font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Risk</div><div id="crRisk" class="text-base font-bold font-mono text-hyper-yellow">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Liquidation</div><div id="crLiq" class="text-base font-bold font-mono text-hyper-red">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">R : R</div><div id="crRR" class="text-base font-bold font-mono text-white">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Profit at TP</div><div id="crTP" class="text-base font-bold font-mono text-hyper-teal">—</div></div>
+                            <div class="stat-card-sm"><div class="text-[10px] text-hyper-muted uppercase tracking-wider mb-1">Loss at SL</div><div id="crSL" class="text-base font-bold font-mono text-hyper-red">—</div></div>
                         </div>
-                        <div id="calcChart" class="relative border border-hyper-border rounded-lg bg-hyper-bg p-2"></div>
                     </div>
                 </div>
+                <div id="calcChart" class="relative mt-3 border border-hyper-border rounded-lg bg-hyper-bg p-2"></div>
             </div>
         </section>
 
@@ -476,6 +485,34 @@
                         <tbody><tr><td colspan="6" class="text-center text-hyper-muted py-6">Loading…</td></tr></tbody>
                     </table>
                 </div>
+            </div>
+        </section>
+
+        <!-- ===== CONVERTER (online crypto ⇄ USD, online «перевод» сумм) ===== -->
+        <section id="converter" class="max-w-5xl mx-auto px-4 pb-12">
+            <div class="bg-hyper-panel border border-hyper-border rounded-xl p-5 md:p-6">
+                <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <h3 class="text-lg font-bold text-white">Converter <span class="text-hyper-muted2 text-[12px] font-normal">crypto ⇄ USD, live prices</span></h3>
+                    <span id="convNote" class="text-[10px] text-hyper-muted font-mono uppercase tracking-wider">live</span>
+                </div>
+                <div class="grid sm:grid-cols-3 gap-3 items-end">
+                    <div>
+                        <label class="text-[10px] text-hyper-muted uppercase tracking-wider" id="convAmountLabel">Amount</label>
+                        <input id="convAmount" type="number" class="hl-input mt-1" value="1" step="any" min="0">
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-hyper-muted uppercase tracking-wider" id="convCoinLabel">Coin</label>
+                        <select id="convCoin" class="hl-input mt-1"></select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-hyper-muted uppercase tracking-wider">Value</label>
+                        <div class="flex gap-2 mt-1">
+                            <div id="convResult" class="hl-input font-mono flex-1 flex items-center text-hyper-teal font-bold">—</div>
+                            <button id="convSwap" type="button" title="Swap direction" class="px-3 rounded-lg border border-hyper-border text-hyper-muted2 hover:text-hyper-teal hover:border-hyper-teal transition-colors">⇄</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-[10px] text-hyper-muted mt-2">Prices refresh every 30s · <span id="convRate">—</span></div>
             </div>
         </section>
 
@@ -893,6 +930,48 @@
         loadFunding(); setInterval(loadFunding, 60000);
     </script>
     <script>
+        // ===== CONVERTER: крипта ⇄ USD по живым ценам /api/prices =====
+        let convPrices = {};
+        let convMode = 'c2u'; // c2u = crypto → USD, u2c = USD → crypto
+        async function loadConvPrices() {
+            try {
+                const j = await (await fetch('/api/prices')).json();
+                (j.prices || []).forEach(p => { convPrices[p.symbol] = p.price; });
+                const sel = $('convCoin');
+                const cur = sel.value || 'BTC';
+                sel.innerHTML = Object.keys(convPrices).map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+                sel.value = convPrices[cur] ? cur : 'BTC';
+                $('convNote').textContent = 'live · ' + new Date((j.updated || 0) * 1000).toLocaleTimeString('en-US', {hour12:false});
+                convRender();
+            } catch(e) { /* тихо пропускаем — цены обновятся на следующем тике */ }
+        }
+        function convRender() {
+            const sym = $('convCoin').value;
+            const px = convPrices[sym];
+            const amt = parseFloat($('convAmount').value);
+            if (!px || !isFinite(amt)) { $('convResult').textContent = '—'; $('convRate').textContent = '—'; return; }
+            if (convMode === 'c2u') {
+                $('convAmountLabel').textContent = 'Amount (' + sym + ')';
+                $('convCoinLabel').textContent = 'Coin';
+                $('convResult').textContent = '$' + fmtUsd(amt * px);
+            } else {
+                $('convAmountLabel').textContent = 'Amount (USD)';
+                $('convCoinLabel').textContent = 'Coin to get';
+                $('convResult').textContent = fmtPrice(amt / px) + ' ' + sym;
+            }
+            $('convRate').textContent = `1 ${sym} = $${fmtPrice(px)}`;
+        }
+        $('convAmount').addEventListener('input', convRender);
+        $('convCoin').addEventListener('change', convRender);
+        $('convSwap').addEventListener('click', () => {
+            convMode = convMode === 'c2u' ? 'u2c' : 'c2u';
+            $('convSwap').classList.toggle('text-hyper-teal', convMode === 'u2c');
+            $('convSwap').classList.toggle('border-hyper-teal', convMode === 'u2c');
+            convRender();
+        });
+        loadConvPrices(); setInterval(loadConvPrices, 30000);
+    </script>
+    <script>
         // ===== WHALE FEED =====
         function shortAddr(a) { return a.slice(0, 6) + '…' + a.slice(-4); }
 
@@ -992,6 +1071,7 @@
         let calcLevValue = 10;
         let calcRiskUnit = '$';
         let calcTicker = '';
+        let calcEntryAuto = true; // entry заполнен ценой тикера, а не руками
         let calcCandles = [];
         let calcLines = {};
         let calcChartGeo = null;
@@ -1008,7 +1088,12 @@
 
         document.querySelectorAll('#calcDir .dir-btn').forEach(b => b.addEventListener('click', () => {
             calcDirValue = b.dataset.d;
-            document.querySelectorAll('#calcDir .dir-btn').forEach(x => x.classList.toggle('active', x === b));
+            // Short — красная подсветка, как кнопка Sell/Short на Hyperliquid
+            document.querySelectorAll('#calcDir .dir-btn').forEach(x => {
+                const on = x === b;
+                x.classList.toggle('active', on);
+                x.classList.toggle('active-short', on && x.dataset.d === 'short');
+            });
         }));
         function setLev(v) {
             calcLevValue = Math.max(1, Math.min(40, Math.round(v)));
@@ -1037,14 +1122,27 @@
                 const r = await fetch('/api/candles/' + encodeURIComponent(sym) + '?hours=72');
                 if (!r.ok) { $('calcLivePrice').textContent = 'unknown ticker'; return; }
                 const j = await r.json();
+                const changed = j.coin !== calcTicker;
+                const prevClose = calcCandles.length ? calcCandles[calcCandles.length - 1].c : null;
                 calcTicker = j.coin;
                 calcCandles = j.candles || [];
                 const last = calcCandles[calcCandles.length - 1];
+                let lastClose = null;
                 if (last) {
+                    lastClose = last.c;
                     $('calcLivePrice').textContent = '$' + fmtPrice(last.c) + ' · live';
-                    if (!$('calcEntry').value) setNum('calcEntry', last.c);
+                    // Entry = цена ИМЕННО выбранного тикера (не BTC) и пересобирается
+                    // при смене тикера, пока поле не поправили руками
+                    if (calcEntryAuto || changed || !$('calcEntry').value) {
+                        calcEntryAuto = true;
+                        setNum('calcEntry', last.c);
+                        $('calcEntry').classList.add('auto-filled');
+                    }
                 }
-                drawCalcChart();
+                const hl = $('calcHlBtn');
+                if (hl) hl.href = 'https://app.hyperliquid.xyz/trade/' + encodeURIComponent(j.coin);
+                // Экономия RAM: SVG перерисовываем только если данные реально изменились
+                if (changed || prevClose !== lastClose) drawCalcChart();
             } catch(e) { $('calcLivePrice').textContent = '—'; }
         }
         let calcTickerTimer = null;
@@ -1054,7 +1152,9 @@
             calcTickerTimer = setTimeout(() => { if (v) loadCalcTicker(v); }, 600);
         });
         $('calcTicker').addEventListener('keydown', e => { if (e.key === 'Enter') loadCalcTicker($('calcTicker').value); });
-        setInterval(() => { if (calcTicker && !document.hidden) loadCalcTicker(calcTicker); }, 60000);
+        // График: обновляем раз в 5 секунд, только при активной вкладке (экономия RAM/трафика)
+        setInterval(() => { if (calcTicker && !document.hidden) loadCalcTicker(calcTicker); }, 5000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden && calcTicker) loadCalcTicker(calcTicker); });
     </script>
     <script>
         // ===== Решатель: считает то, чего не хватает (плечо всегда обязательно) =====
@@ -1130,6 +1230,23 @@
             const riskPct = C ? riskAmount / C * 100 : null;
             calcLines = { entry: E, stop: S, take: T, liq: liq };
 
+            // Подставляем посчитанное прямо в поля и красим их янтарным —
+            // сразу видно, чего не хватало во вводе и что нужно проверить
+            const fill = (id, v, digits) => {
+                if (v === null || !isFinite(v)) return;
+                const el = $(id);
+                el.value = digits ? Number(v.toFixed(digits)) : v;
+                el.classList.add('auto-filled');
+            };
+            if (C_in === null) fill('calcCapital', C, 2);
+            if (!num('calcEntry')) { fill('calcEntry', E, 8); calcEntryAuto = true; }
+            if (S_in === null) fill('calcStop', S, 8);
+            if (T_in === null) fill('calcTake', T, 8);
+            if (R_in === null && calcRiskUnit === '$') fill('calcRisk', riskAmount, 2);
+            const autoCount = ['calcCapital','calcEntry','calcStop','calcTake','calcRisk']
+                .filter(id => $(id).classList.contains('auto-filled')).length;
+            const autoNote = autoCount ? `Auto-filled ${autoCount} field${autoCount > 1 ? 's' : ''} (amber) — check before trading. ` : '';
+
             $('crSize').textContent = '$' + fmtUsd(notional);
             $('crQty').textContent = fmtPrice(qty);
             $('crMargin').textContent = '$' + fmtUsd(margin);
@@ -1138,12 +1255,42 @@
             $('crRR').textContent = rr ? '1:' + rr.toFixed(2) : '—';
             $('crTP').textContent = pnlTP !== null ? (pnlTP >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(pnlTP)) : '—';
             $('crSL').textContent = pnlSL !== null ? (pnlSL >= 0 ? '+$' : '-$') + fmtUsd(Math.abs(pnlSL)) : '—';
-            $('calcNote').textContent = (notes.length ? notes.join(' · ') + ' · ' : '') + 'Fees included (0.045% × 2).';
+            $('calcNote').textContent = autoNote + (notes.length ? notes.join(' · ') + ' · ' : '') + 'Fees included (0.045% × 2).';
             drawCalcChart();
         }
         $('calcBtn').addEventListener('click', calcPosition);
         ['calcCapital','calcEntry','calcStop','calcTake','calcRisk'].forEach(id =>
             $(id).addEventListener('keydown', e => { if (e.key === 'Enter') calcPosition(); }));
+        // Правка поля руками — снимаем янтарную «авто»-подсветку (entry больше не перезаписываем)
+        ['calcCapital','calcEntry','calcStop','calcTake','calcRisk'].forEach(id =>
+            $(id).addEventListener('input', () => {
+                if (id === 'calcEntry') calcEntryAuto = false;
+                $(id).classList.remove('auto-filled');
+            }));
+
+        // ===== Copy summary: расчёт готов к вставке в Telegram =====
+        function calcSummaryText() {
+            const long = calcDirValue === 'long';
+            const v = (id) => ($(id).value || '').trim();
+            const t = (id) => ($(id).textContent || '').trim();
+            return [
+                '⚡ RustDeck — position plan',
+                `${calcTicker || $('calcTicker').value.toUpperCase()} ${long ? 'LONG' : 'SHORT'} · ${calcLevValue}x`,
+                `Entry ${v('calcEntry') ? '$' + v('calcEntry') : '—'} · Stop ${v('calcStop') ? '$' + v('calcStop') : '—'} · Take ${v('calcTake') ? '$' + v('calcTake') : '—'}`,
+                `Size ${t('crSize')} · Qty ${t('crQty')} · Margin ${t('crMargin')}`,
+                `Risk ${t('crRisk')} · R:R ${t('crRR')} · Liq ${t('crLiq')}`,
+                `Profit at TP ${t('crTP')} · Loss at SL ${t('crSL')}`,
+                'rustdeck.app',
+            ].join('\n');
+        }
+        $('calcCopyBtn').addEventListener('click', async () => {
+            const txt = calcSummaryText();
+            try {
+                if (navigator.clipboard) await navigator.clipboard.writeText(txt);
+                else prompt('Copy your position plan:', txt);
+                showToast('Copied ✅', 'Position plan copied — paste it in Telegram', false);
+            } catch(e) { prompt('Copy your position plan:', txt); }
+        });
     </script>
     <script>
         // ===== Свечной график: линии Entry / SL / TP / LIQ + текущая цена (как на HL) =====
@@ -1236,6 +1383,7 @@
                 <div class="text-[11px] text-hyper-muted2 mt-0.5" id="authSub">Choose an account</div>
             </div>
             <div id="authAccounts" class="mb-3"></div>
+            <button id="authGoogleBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-white text-[#1f1f1f] hover:bg-[#eaecef] transition-colors mb-2">Continue with Google</button>
             <button id="authTgBtn" class="w-full text-[12px] font-bold py-3 rounded-lg bg-hyper-teal text-hyper-bg hover:bg-hyper-tealDim transition-colors mb-2">✈️ Continue with Telegram</button>
             <div id="authTgBox" class="hidden mb-2">
                 <div class="bg-hyper-bg border border-hyper-border rounded-lg p-3 text-center">
@@ -1328,6 +1476,7 @@
             $('signOutBtn').addEventListener('click', () => {
                 profile = null;
                 localStorage.removeItem(PKEY);
+                fetch('/api/logout', { method: 'POST' }).catch(() => {});
                 renderProfile();
                 renderChips();
                 applyAlertSettings();
@@ -1419,6 +1568,8 @@
                                 if (!profile.name) profile.name = s.tg_username ? '@' + s.tg_username : 'Trader';
                                 saveProfile();
                                 renderProfile();
+                                updateTgAlertStatus();
+                                if (currentWalletAddr) registerTgWatch(currentWalletAddr);
                             }
                             showToast('Telegram linked ✅', 'Signed in' + ((profile && profile.tg && profile.tg.username) ? ' as @' + profile.tg.username : '') + ' — trial started.', false);
                         } else if (s.status === 'expired' || s.status === 'not_found') {
@@ -1467,6 +1618,8 @@
             $('authTgBox').classList.remove('hidden');
             startTgLink({ btn: 'authTgBtn', box: 'authTgBox', code: 'authCode', link: 'authDeepLink', status: 'authStatus' });
         });
+        // Google OAuth: уходим на /auth/google, сервер вернёт нас с cookie-сессией
+        $('authGoogleBtn').addEventListener('click', () => { window.location.href = '/auth/google'; });
         $('authCopyBtn').addEventListener('click', () => {
             const code = $('authCode').textContent.trim();
             if (navigator.clipboard) navigator.clipboard.writeText(code);
@@ -1542,6 +1695,23 @@
             $('evOrders').checked = a.onOrders !== false;
             $('evSound').checked = a.sound;
             updatePermBadge();
+            updateTgAlertStatus();
+        }
+
+        // Строка статуса Telegram под тумблером: связан / приглашение подключить
+        function updateTgAlertStatus() {
+            const el = $('tgAlertStatus');
+            if (!el) return;
+            if (profile && profile.tg && profile.tg.chat_id) {
+                const who = profile.tg.username ? ' as @' + esc(profile.tg.username) : '';
+                el.innerHTML = `✈️ Telegram linked${who} — watched wallets alert you in DMs too`;
+            } else if (profile && profile.tg && profile.tg.username) {
+                el.innerHTML = `✈️ Linked as @${esc(profile.tg.username)} — send /watch 0x… to the bot for DM alerts`;
+            } else {
+                el.innerHTML = `✈️ <button id="tgAlertConnect" class="text-hyper-teal underline decoration-dotted underline-offset-2">Connect Telegram</button> — same alerts in your DMs, 24/7`;
+                const b = $('tgAlertConnect');
+                if (b) b.addEventListener('click', openAuth);
+            }
         }
 
         function beep(negative) {
@@ -1653,6 +1823,8 @@
             stopWatching();
             prevState = null;
             if (!currentWalletAddr) return;
+            // Если Telegram привязан — кошелёк ставится на слежение и в боте
+            if (profile && profile.tg && profile.tg.chat_id) registerTgWatch(currentWalletAddr);
             const poll = async () => {
                 try {
                     const r = await fetch('/api/wallet/' + currentWalletAddr);
@@ -1666,6 +1838,24 @@
 
         function stopWatching() {
             if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+        }
+
+        // Мост «сайт → Telegram»: добавляет кошелёк в список слежения бота,
+        // чтобы те же события приходили в личку (если аккаунт привязан)
+        async function registerTgWatch(addr) {
+            if (!(profile && profile.tg && profile.tg.chat_id && addr)) return;
+            try {
+                const r = await fetch('/api/tg/watch', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: profile.tg.chat_id, wallet: addr })
+                });
+                const j = await r.json();
+                if (j && j.ok && !j.already) {
+                    showToast('Telegram alerts on ✈️', `Watching ${addr.slice(0, 6)}…${addr.slice(-4)} in Telegram too`, false);
+                } else if (j && j.error === 'limit_reached') {
+                    showToast('Telegram watch limit', 'Up to 5 wallets — remove one with /unwatch in the bot', true);
+                }
+            } catch(e) { /* TG-мост не критичен для работы сайта */ }
         }
 
         // ===== Управление алертами =====
@@ -1744,10 +1934,31 @@
             }
         });
 
+        // ===== Синхронизация с сервером: Google-cookie → профиль в браузере =====
+        async function applyServerSession() {
+            try {
+                const j = await (await fetch('/api/me')).json();
+                if (!j || !j.authenticated) return;
+                if (!profile) profile = { name: '', email: null, wallets: [], alerts: { enabled: false, onOpen: true, onClose: true, onLiq: true, onFill: false, onOrders: true, sound: true }, lastWallet: '' };
+                profile.email = j.email || profile.email;
+                if (j.name) profile.name = j.name;
+                profile.google = true;
+                if (j.tg) profile.tg = { username: j.tg.username || null, chat_id: j.tg.chat_id || null };
+                saveProfile();
+                renderProfile();
+                updateTgAlertStatus();
+            } catch(e) { /* сервер недоступен — остаёмся на локальном профиле */ }
+        }
+
         // ===== Инициализация =====
         renderProfile();
         renderChips();
         applyAlertSettings();
+        applyServerSession();
+        const q = new URLSearchParams(location.search);
+        if (q.get('google') === 'ok') showToast('Signed in with Google ✅', 'Account synced — link Telegram any time from the profile panel', false);
+        if (q.get('google') === 'unavailable') showToast('Google sign-in not enabled', 'Google OAuth keys are not configured on the server yet', true);
+        if (q.get('google') === 'failed') showToast('Google sign-in failed', 'Try again in a minute or use Telegram instead', true);
         if (profile && profile.lastWallet) {
             $('walletAddress').value = profile.lastWallet;
             trackWallet();

@@ -15,6 +15,9 @@ rustdeck.db
 
 # Временные файлы локальных тестов
 smoke_out.txt
+smoke_*.txt
+js_check_out.txt
+done_marker.txt
 uv_out.txt
 uv_err.txt
 py_test.txt

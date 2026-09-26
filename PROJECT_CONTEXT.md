@@ -210,3 +210,55 @@ ROADMAP:   мульти-биржи (Bybit/Binance fees), funding checker, trade 
   SEO-подмену, sitemap, localStorage, Copy Results, все SEO-страницы
 - Мобильная адаптивность обязательна (половина трафика с телефонов)
 - Только бесплатные решения, без рекламы
+
+## ОБНОВЛЕНИЕ 26.09.2026 (UI-полировка + авторизация + TG-алерты)
+- Калькулятор на хабе компактнее: кнопка «Calculate Position» маленькая и внутри левой
+  колонки (раньше она вылезала блоком через битую вложенность div'ов), карточки
+  результатов — stat-card-sm, график на всю ширину под сеткой.
+- Entry подставляет цену ИМЕННО выбранного тикера (btc→eth пересчитывает), пока поле
+  не поправили руками (`calcEntryAuto`). После Calculate посчитанные поля подставляются
+  в инпуты и подсвечиваются янтарным (`auto-filled`) — видно, чего не хватало.
+- Short — красная подсветка (как Sell/Short на Hyperliquid): `.dir-btn.active-short`.
+- Хедер sticky (`sticky top-0 z-40 bg-hyper-bg/95 backdrop-blur`) — навигация не уезжает;
+  `section { scroll-margin-top:92px }`, чтобы якоря не прятались под хедер.
+- График калькулятора обновляется каждые 5 сек, только при активной вкладке
+  (visibilitychange). Сервер: CANDLE_TTL=5с, CANDLE_MAX=16 записей, вытеснение самой
+  старой (было clear() всего кэша), SVG на клиенте не перерисовывается без изменений.
+- НОВОЕ: Converter на хабе (#converter) — крипта ⇄ USD по живым ценам /api/prices,
+  переключение направления кнопкой ⇄.
+- НОВОЕ: «📋 Copy summary» — готовый текст плана позиции для Telegram; «Trade on HL →»
+  ведёт на app.hyperliquid.xyz/trade/{COIN}.
+- dev-утилита: `python js_check.py` — проверка синтаксиса всех inline-<script> в
+  app/index.html и templates/index.html через `node --check` (результат в js_check_out.txt).
+- TELEGRAM-АЛЕРТЫ: бот больше не теряет сообщения молча — send_message повторяет отправку
+  без Markdown, если Telegram отклонил разметку. Мост «сайт → TG»: при включении Live
+  Alerts хаб вызывает POST /api/tg/watch {chat_id, wallet} → bot.add_watch() добавляет
+  кошелёк в слежение (лимит 5, дедуп) и бот пишет «👀 Website: now watching…».
+- АВТОРИЗАЦИЯ: Google OAuth 2.0 (stdlib): /auth/google → Google → /auth/google/callback
+  → cookie `rd_session` (HMAC-подпись, 30 дней) → GET /api/me отдаёт email/имя и
+  привязанный TG. POST /api/logout. Кнопка «Continue with Google» в auth-модалке;
+  Telegram можно привязать в любой момент из профиля («🔑 Create code») — после /link
+  профиль сам подтянет chat_id (@/api/me) и включит DM-алерты.
+
+## КАК НАСТРОИТЬ GOOGLE SIGN-IN (5 минут)
+1. console.cloud.google.com → New Project (rustdeck) → APIs & Services → OAuth consent
+   screen: External, название RustDeck, support email; Scopes: только
+   `openid`, `email`, `profile` (пользовательские данные не запрашиваем).
+2. Credentials → Create credentials → OAuth client ID → Web application.
+   Authorized redirect URIs: `https://rustdeck.app/auth/google/callback`
+   (для локальной отладки добавь `http://127.0.0.1:8000/auth/google/callback`).
+3. Render Dashboard → сервис rustdeck-calc → Environment → добавить
+   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, APP_SECRET (любая длинная случайная строка,
+   напр. `openssl rand -hex 32`) → Save (сервис передеплоится).
+4. Без ключей кнопка не ломает сайт: /auth/google вернёт на `/?google=unavailable`
+   и покажет тост «Google sign-in not enabled».
+
+## КАК НАСТРОИТЬ api.rustdeck.app
+1. Render Dashboard → сервис rustdeck-calc → Settings → Custom Domains → Add:
+   вписать `api.rustdeck.app` → Render покажет, что нужен CNAME.
+2. Porkbun → DNS Records → Add: Type `CNAME`, Host `api`,
+   Answer `riskcalc.onrender.com`, TTL 600 → Save.
+3. Через 5–30 минут Render выпустит TLS. Проверка: `https://api.rustdeck.app/api/prices`
+   и `https://api.rustdeck.app/api/me` (тот же сервис + Host-роутинг в main.py).
+   Позже, при желании, api-домен можно переключить на отдельный JSON-роутер
+   (CORS-заголовки добавить в main.py middleware'ом).
